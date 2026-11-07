@@ -89,6 +89,9 @@ td.item{min-width:160px}
 .ok{color:var(--in)}
 .ops{white-space:nowrap}
 .ops button{padding:3px 8px;font-size:12px;margin-left:2px}
+.st{display:inline-flex;margin-right:6px}.st button{margin:0;border-radius:0}
+.st button:first-child{border-radius:8px 0 0 8px}.st button:last-child{border-radius:0 8px 8px 0;margin-left:-1px}
+.st button.on{background:var(--brand);border-color:var(--brand);color:#fff;cursor:default}
 tfoot td{font-weight:700;background:#fafbfc}
 tr.click{cursor:pointer}tr.click:hover td{background:#f6f8fb}
 .neg-t{color:var(--ex)}
@@ -172,7 +175,7 @@ tr.new td{background:#fff8db}
         <span class="spacer"></span>
         <button class="in" data-new="income">＋ 收入</button>
         <button class="ex" data-new="expense">＋ 支出</button>
-        <button id="impBtn">📄 匯入請款單</button>
+        <button id="impBtn">📄 匯入公司請款</button>
         <input type="file" id="impFile" accept="application/pdf,.pdf" multiple hidden>
         <button id="mCsv">匯出 CSV</button>
       </div>
@@ -282,7 +285,7 @@ tr.new td{background:#fff8db}
   <datalist id="projList"></datalist><datalist id="partyList"></datalist>
 </dialog>
 <dialog id="importDlg">
-  <div class="dlg-h">匯入請款單 <span class="hint" style="font-weight:400">— 請核對辨識結果，可直接修改</span></div>
+  <div class="dlg-h">匯入公司請款 <span class="hint" style="font-weight:400">— 請核對辨識結果，可直接修改</span></div>
   <div class="dlg-scroll" id="impList"></div>
   <div class="dlg-f">
     <button type="button" id="impCancel">取消</button>
@@ -372,7 +375,7 @@ function rowHtml(x, showYear){
     <td>${esc(x.method)}${x.invoice?`<div class="note">${esc(x.invoice)}</div>`:''}</td>
     <td>${pend?`<span class="tag pending">${x.type==='income'?'未收':'未付'}</span>`:'<span class="ok">✓</span>'}</td>
     <td class="num ${x.type}">${x.type==='expense'?'-':''}$${fmt(x.amount)}${exclOf(x)!==+x.amount?`<div class="note">未稅 $${fmt(exclOf(x))}</div>`:''}${x.invType?`<div class="note">${esc(x.invType)}</div>`:''}</td>
-    <td class="ops">${pend?`<button data-act="settle" data-id="${x.id}">${x.type==='income'?'已收':'已付'}</button>`:''}<button data-act="edit" data-id="${x.id}">編輯</button><button data-act="copy" data-id="${x.id}">複製</button><button data-act="del" data-id="${x.id}">刪除</button></td>
+    <td class="ops"><span class="st"><button data-act="settle" data-id="${x.id}" class="${pend?'':'on'}">${x.type==='income'?'已收':'已付'}</button><button data-act="unsettle" data-id="${x.id}" class="${pend?'on':''}">${x.type==='income'?'未收':'未付'}</button></span><button data-act="edit" data-id="${x.id}">編輯</button><button data-act="copy" data-id="${x.id}">複製</button><button data-act="del" data-id="${x.id}">刪除</button></td>
   </tr>`;
 }
 
@@ -570,6 +573,10 @@ document.addEventListener('click', async e => {
     const act = b.dataset.act;
     if (act==='edit') openEntry(null, x);
     if (act==='copy') openEntry(null, x, true);
+    if ((act==='settle' && x.status!=='pending') || (act==='unsettle' && x.status==='pending')) return;
+    if (act==='unsettle'){
+      try { await db.collection(COL).doc(x.id).update({ status:'pending', updatedAt:TS(), updatedBy:auth.currentUser.email }); toast(x.type==='income'?'已改為未收款':'已改為未付款'); refresh(); } catch(err){ handleErr(err); }
+    }
     if (act==='settle'){
       try { await db.collection(COL).doc(x.id).update({ status:'done', settledAt:TS(), updatedAt:TS(), updatedBy:auth.currentUser.email }); toast(x.type==='income'?'已標記收款':'已標記付款'); refresh(); } catch(err){ handleErr(err); }
     }
@@ -700,7 +707,7 @@ async function readPdf(file){
 $('#impBtn').onclick = () => { if (!window.pdfjsLib) return alert('PDF 讀取元件載入失敗，請重新整理頁面'); $('#impFile').value = ''; $('#impFile').click(); };
 $('#impFile').onchange = async e => {
   const files = [...e.target.files]; if (!files.length) return;
-  $('#mBusy').textContent = '讀取請款單…';
+  $('#mBusy').textContent = '讀取公司請款…';
   const out = [];
   for (const f of files){
     try { const { annot, text } = await readPdf(f); out.push(parseInvoice(annot, text, f.name, cats.income)); }
@@ -750,7 +757,7 @@ $('#impList').addEventListener('input', e => {
 $('#impCancel').onclick = () => $('#importDlg').close();
 $('#impSave').onclick = async () => {
   const rows = [...document.querySelectorAll('#impList .imp-row')].filter(el => el.querySelector('.imp-on').checked).map(el => state.imports[el.dataset.i]);
-  if (!rows.length) return alert('沒有勾選要匯入的請款單');
+  if (!rows.length) return alert('沒有勾選要匯入的公司請款');
   const bad = rows.find(r => !(r.amount > 0) || !/^\d{4}-\d{2}-\d{2}$/.test(r.date));
   if (bad) return alert(`「${bad.file}」的日期或金額不完整，請補上後再匯入`);
   const batch = db.batch(), who = auth.currentUser.email, ids = [];
@@ -766,7 +773,7 @@ $('#impSave').onclick = async () => {
     const byMonth = {}; rows.forEach(r => { const k = `${+r.date.slice(0,4)}/${+r.date.slice(5,7)}`; byMonth[k] = (byMonth[k]||0) + 1; });
     const summary = Object.entries(byMonth).map(([k,n]) => `${k} 月 ${n} 筆`).join('、');
     switchView(rows.every(r => r.status === 'done') ? 'year' : 'pending');
-    alert(`已匯入 ${rows.length} 筆請款（依發票日期）：${summary}\n\n請到對應月份的月報表查看；剛匯入的紀錄會以黃色標示。`);
+    alert(`已匯入 ${rows.length} 筆公司請款（依發票日期）：${summary}\n\n請到對應月份的月報表查看；剛匯入的紀錄會以黃色標示。`);
   }
   catch(err){ handleErr(err); }
 };
