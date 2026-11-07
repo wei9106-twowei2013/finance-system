@@ -193,7 +193,7 @@ tr.new td{background:#fff8db}
           <input id="fSearch" placeholder="搜尋項目、專案、客戶/廠商、發票號碼、備註…">
         </div>
         <div class="tbl-wrap"><table>
-          <thead><tr><th>日期</th><th>類型</th><th>分類</th><th>項目</th><th>專案／對象</th><th>方式／單據</th><th>狀態</th><th class="num">金額</th><th></th></tr></thead>
+          <thead><tr><th>日期</th><th>類型</th><th>分類</th><th>專案</th><th>項目</th><th>方式／單據</th><th>狀態</th><th class="num">金額</th><th></th></tr></thead>
           <tbody id="mBody"></tbody>
           <tfoot id="mFoot"></tfoot>
         </table></div>
@@ -234,7 +234,7 @@ tr.new td{background:#fff8db}
       <div class="cards" id="pCards"></div>
       <div class="panel">
         <div class="tbl-wrap"><table>
-          <thead><tr><th>日期</th><th>類型</th><th>分類</th><th>項目</th><th>專案／對象</th><th>方式／單據</th><th>狀態</th><th class="num">金額</th><th></th></tr></thead>
+          <thead><tr><th>日期</th><th>類型</th><th>分類</th><th>專案</th><th>項目</th><th>方式／單據</th><th>狀態</th><th class="num">金額</th><th></th></tr></thead>
           <tbody id="pBody"></tbody>
         </table></div>
       </div>
@@ -370,8 +370,8 @@ function rowHtml(x, showYear){
     <td>${esc(showYear ? x.date : x.date.slice(5))}</td>
     <td><span class="tag ${x.type}">${x.type==='income'?'收入':'支出'}</span></td>
     <td>${esc(x.category)}</td>
-    <td class="item">${esc(x.item)}${x.note?`<div class="note">${esc(x.note)}</div>`:''}</td>
-    <td>${esc(x.project)}${x.party?`<div class="note">${esc(x.party)}${x.contact?'・'+esc(x.contact):''}</div>`:''}</td>
+    <td class="item">${esc(x.project)}${x.party?`<div class="note">${esc(x.party)}${x.contact?'・'+esc(x.contact):''}</div>`:''}</td>
+    <td>${esc(x.item)}${x.note?`<div class="note">${esc(x.note)}</div>`:''}</td>
     <td>${esc(x.method)}${x.invoice?`<div class="note">${esc(x.invoice)}</div>`:''}</td>
     <td>${pend?`<span class="tag pending">${x.type==='income'?'未收':'未付'}</span>`:'<span class="ok">✓</span>'}</td>
     <td class="num ${x.type}">${x.type==='expense'?'-':''}$${fmt(x.amount)}${exclOf(x)!==+x.amount?`<div class="note">未稅 $${fmt(exclOf(x))}</div>`:''}${x.invType?`<div class="note">${esc(x.invType)}</div>`:''}</td>
