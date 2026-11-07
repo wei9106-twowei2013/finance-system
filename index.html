@@ -268,13 +268,16 @@ dialog::backdrop{background:rgba(20,25,35,.45)}
 <script>
 /* ===== Firebase 設定：請貼上與成本統計系統相同的 firebaseConfig ===== */
 const firebaseConfig = {
-  apiKey: "請貼上",
+  apiKey: "AIzaSyD6t7woI7dDhIU-Ta9bQJyIUcdyNOHMkV8",
   authDomain: "twowei-progresstrack.firebaseapp.com",
   projectId: "twowei-progresstrack",
-  storageBucket: "請貼上",
-  messagingSenderId: "請貼上",
-  appId: "請貼上"
+  storageBucket: "twowei-progresstrack.firebasestorage.app",
+  messagingSenderId: "1016966707396",
+  appId: "1:1016966707396:web:1aeb01a954f8c261b7f191",
+  measurementId: "G-DDGZN048K6"
 };
+if (/請貼上/.test(JSON.stringify(firebaseConfig)))
+  alert('尚未設定 Firebase：請把成本統計系統的 firebaseConfig 整段貼到 index.html 取代「請貼上」的部分。');
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth(), db = firebase.firestore();
 const COL = 'finance_entries', SET = 'finance_settings';
@@ -571,7 +574,17 @@ $('#fSearch').oninput = renderMonthTable;
 $('#loginForm').addEventListener('submit', async e => {
   e.preventDefault(); $('#loginErr').textContent = '';
   try { await auth.signInWithEmailAndPassword($('#email').value.trim(), $('#pw').value); }
-  catch(err){ $('#loginErr').textContent = '登入失敗：帳號或密碼錯誤'; }
+  catch(err){
+    const c = err.code || '';
+    const msg =
+      /invalid-api-key|api-key-not-valid/.test(c) ? 'Firebase 設定錯誤：firebaseConfig 尚未貼上或 apiKey 不正確' :
+      /invalid-credential|wrong-password|user-not-found|invalid-login/.test(c) ? '帳號或密碼錯誤' :
+      /too-many-requests/.test(c) ? '嘗試次數過多，請稍後再試或重設密碼' :
+      /unauthorized-domain/.test(c) ? '此網域未授權：請到 Firebase Authentication → 設定 → 授權網域加入 ' + location.hostname :
+      /network-request-failed/.test(c) ? '網路連線失敗，請檢查網路' :
+      '登入失敗';
+    $('#loginErr').textContent = msg + (c ? `（${c}）` : '');
+  }
 });
 $('#logout').onclick = () => auth.signOut();
 auth.onAuthStateChanged(async u => {
