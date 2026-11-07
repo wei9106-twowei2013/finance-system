@@ -126,9 +126,15 @@ tr.new td{background:#fff8db}
 .imp-row.off{opacity:.45}
 .imp-head{display:flex;gap:8px;align-items:center;margin-bottom:8px;font-size:13px}
 .imp-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.imp-body{display:grid;grid-template-columns:150px 1fr;gap:12px;align-items:start}
+.imp-body.zoom{grid-template-columns:1fr}
+.imp-img{width:100%;border:1px solid var(--line);border-radius:8px;cursor:zoom-in;background:#fff}
+.imp-body.zoom .imp-img{cursor:zoom-out}
+@media(max-width:620px){.imp-body{grid-template-columns:1fr}}
+.imp-head .tag{margin-left:4px}
 .imp-grid label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--sub)}
 .imp-grid .w2{grid-column:span 2}.imp-grid .w4{grid-column:1/-1}
-.imp-info{font-size:12px;color:var(--sub);margin-top:6px}.imp-info .w{color:var(--warn)}
+.imp-info{font-size:12px;color:var(--sub);margin-top:8px}.imp-info .w{color:var(--warn);margin-top:2px}
 @media(max-width:620px){.imp-grid{grid-template-columns:1fr 1fr}}
 #importDlg{width:min(900px,calc(100% - 32px))}
 .dlg-scroll{max-height:65vh;overflow:auto;padding:16px 20px}
@@ -176,7 +182,8 @@ tr.new td{background:#fff8db}
         <button class="in" data-new="income">＋ 收入</button>
         <button class="ex" data-new="expense">＋ 支出</button>
         <button id="impBtn">📄 匯入公司請款</button>
-        <input type="file" id="impFile" accept="application/pdf,.pdf" multiple hidden>
+        <button id="impExpBtn">🧾 匯入支出</button>
+        <input type="file" id="impFile" accept="application/pdf,.pdf,image/*" multiple hidden>
         <button id="mCsv">匯出 CSV</button>
       </div>
       <div class="cards" id="mCards"></div>
@@ -285,7 +292,7 @@ tr.new td{background:#fff8db}
   <datalist id="projList"></datalist><datalist id="partyList"></datalist>
 </dialog>
 <dialog id="importDlg">
-  <div class="dlg-h">匯入公司請款 <span class="hint" style="font-weight:400">— 請核對辨識結果，可直接修改</span></div>
+  <div class="dlg-h"><span id="impTitle">匯入公司請款</span> <span class="hint" style="font-weight:400">— 請核對辨識結果，可直接修改</span></div>
   <div class="dlg-scroll" id="impList"></div>
   <div class="dlg-f">
     <button type="button" id="impCancel">取消</button>
@@ -312,6 +319,7 @@ const firebaseConfig = {
 if (/請貼上/.test(JSON.stringify(firebaseConfig)))
   alert('尚未設定 Firebase：請把成本統計系統的 firebaseConfig 整段貼到 index.html 取代「請貼上」的部分。');
 firebase.initializeApp(firebaseConfig);
+window.FIREBASE_CONFIG = firebaseConfig;
 const auth = firebase.auth(), db = firebase.firestore();
 const COL = 'finance_entries', SET = 'finance_settings';
 const TS = () => firebase.firestore.FieldValue.serverTimestamp();
@@ -344,7 +352,7 @@ function handleErr(e){
 }
 
 const state = { view:'month', ym: today().slice(0,7), year: +today().slice(0,4),
-  monthRows:[], yearRows:[], prevRows:[], pendingRows:[], byId:{}, editId:null, imports:[], exclManual:false, justImported:[] };
+  monthRows:[], yearRows:[], prevRows:[], pendingRows:[], byId:{}, editId:null, imports:[], exclManual:false, justImported:[], impMode:'income' };
 
 function remember(rows){ rows.forEach(r => state.byId[r.id] = r); return rows; }
 async function fetchRange(from, to){
@@ -692,8 +700,9 @@ function parseInvoice(annotRaw, textRaw, fileName, catList){
   return r;
 }
 
-/* ===== 匯入請款單 PDF ===== */
+/* ===== 匯入公司請款／發票（PDF、照片、掃描檔） ===== */
 if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+const OUR_TAX_ID = '54071585';
 async function readPdf(file){
   const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
   let annot = '', text = '';
@@ -702,52 +711,183 @@ async function readPdf(file){
     (await page.getAnnotations()).forEach(a => { const s = a.contentsObj?.str || a.contents || ''; if (s) annot += s + '\n'; });
     text += linesFromItems((await page.getTextContent()).items) + '\n';
   }
-  return { annot, text };
+  return { pdf, annot, text };
 }
-$('#impBtn').onclick = () => { if (!window.pdfjsLib) return alert('PDF 讀取元件載入失敗，請重新整理頁面'); $('#impFile').value = ''; $('#impFile').click(); };
+function canvasToJpeg(src, w, h, max){
+  const k = Math.min(1, max / Math.max(w, h)), c = document.createElement('canvas');
+  c.width = Math.round(w * k); c.height = Math.round(h * k);
+  const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+  g.drawImage(src, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', 0.85);
+}
+async function imageToJpeg(file, max = 1800){
+  const bmp = await createImageBitmap(file);
+  return canvasToJpeg(bmp, bmp.width, bmp.height, max);
+}
+async function pdfPageToJpeg(pdf, max = 1800){
+  const page = await pdf.getPage(1), v1 = page.getViewport({ scale: 1 });
+  const vp = page.getViewport({ scale: Math.min(3, max / Math.max(v1.width, v1.height)) });
+  const c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height;
+  const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+  await page.render({ canvasContext: g, viewport: vp }).promise;
+  return canvasToJpeg(c, c.width, c.height, max);
+}
+function guessExpCat(s, list){
+  const hit = list.find(c => c.length >= 2 && s.includes(c.replace(/費$/, '')));
+  if (hit) return hit;
+  const rules = [[/印刷|輸出|大圖|海報/,'印刷輸出費'],[/材料|五金|木料|板材|壓克力|油漆/,'材料費'],[/油|停車|高鐵|計程車|過路/,'交通油資'],
+    [/餐|便當|飲料/,'餐費'],[/電費|水費|瓦斯/,'水電瓦斯'],[/租金|房租/,'租金'],[/軟體|訂閱|雲端/,'軟體訂閱'],[/勞保|健保/,'勞健保']];
+  for (const [re, c] of rules) if (re.test(s) && list.includes(c)) return c;
+  return list.includes('雜支') ? '雜支' : list[0];
+}
+function blankRow(file, warn, mode){
+  const type = mode === 'expense' ? 'expense' : 'income';
+  return { file, type, invType:'三聯式', date:'', party:'', contact:'', item:'', project:'', invoice:'', amount:0, amountExcl:0,
+    category: type === 'income' ? cats.income[0] : (cats.expense.includes('雜支') ? '雜支' : cats.expense[0]), status:'pending', warn:[warn] };
+}
+function fromAI(o, file, mode){
+  const tid = s => String(s || '').replace(/\D/g, '');
+  const sellerOurs = tid(o.sellerTaxId) === OUR_TAX_ID || /圖威/.test(o.sellerName || '');
+  const buyerOurs = tid(o.buyerTaxId) === OUR_TAX_ID || /圖威/.test(o.buyerName || '');
+  const guess = buyerOurs && !sellerOurs ? 'expense' : sellerOurs && !buyerOurs ? 'income' : '';
+  const type = mode === 'expense' || mode === 'income' ? mode : (guess || 'income');
+  const invType = INV_TYPES.includes(o.invType) ? o.invType : '三聯式';
+  const r = { file, type, invType, ai:true, warn:[],
+    date: /^\d{4}-\d{2}-\d{2}$/.test(o.date || '') ? o.date : rocToISO(o.date || ''),
+    party: (type === 'income' ? o.buyerName : o.sellerName) || '',
+    contact: o.contact || '', item: o.item || '', project: '',
+    invoice: String(o.invoiceNo || '').replace(/[\s\-]/g, '').toUpperCase(),
+    amount: Math.round(+o.amount || 0), amountExcl: Math.round(+o.amountExcl || 0), status:'pending' };
+  const tax = Math.round(+o.tax || 0);
+  if (!r.amount && r.amountExcl) r.amount = r.amountExcl + (tax || (isTaxed(invType) ? Math.round(r.amountExcl * 0.05) : 0));
+  if (r.amount && !r.amountExcl) r.amountExcl = tax ? r.amount - tax : exclFrom(r.amount, invType);
+  if (tax && r.amountExcl && r.amount && r.amountExcl + tax !== r.amount) r.warn.push('銷售額＋營業稅 ≠ 總計，請核對');
+  if (tax && r.amountExcl && isTaxed(invType) && Math.abs(Math.round(r.amountExcl * 0.05) - tax) > 1) r.warn.push('營業稅不等於銷售額 × 5%，請核對');
+  if (r.invoice && !/^[A-Z]{2}\d{8}$/.test(r.invoice)) r.warn.push('發票號碼格式應為 2 碼英文＋8 碼數字');
+  if (guess && guess !== type) r.warn.push(guess === 'expense' ? '這張看起來是進項發票（買受人是圖威），請確認類型' : '這張看起來是圖威開出的發票（收入），請確認類型');
+  if (type === 'expense' && !r.party) r.warn.push('讀不到賣方（廠商）名稱，請手動輸入');
+  if (Array.isArray(o.uncertain) && o.uncertain.length) r.warn.push('AI 不確定的欄位：' + o.uncertain.join('、'));
+  r.project = r.item.replace(/\s*(第[一二三四五六七八九十\d]+期款?|頭期款|尾款|期末款)\s*$/, '').trim();
+  r.category = type === 'income' ? guessCat(r.item, cats.income) : guessExpCat(r.item, cats.expense);
+  if (!r.amount) r.warn.push('讀不到金額，請手動輸入');
+  if (!r.date) r.warn.push('讀不到日期，請手動輸入');
+  return r;
+}
+async function aiRead(dataUrl, file, mode){
+  if (!window.aiReadInvoice) throw new Error(window.aiLoadError || 'AI 元件尚未載入，請重新整理頁面');
+  const o = await window.aiReadInvoice(dataUrl.split(',')[1], 'image/jpeg');
+  return fromAI(o, file, mode);
+}
+function textAsExpense(r){                              // 文字辨識結果改作支出用（報價單上的 Customer 是圖威，不是廠商）
+  r.type = 'expense'; r.invoice = r.invoice || ''; r.status = 'pending';
+  if (/圖威/.test(r.party)) r.party = '';
+  r.warn = r.warn.filter(w => !/抬頭/.test(w));
+  if (!r.party) r.warn.push('讀不到賣方（廠商）名稱，請手動輸入');
+  r.category = guessExpCat(r.item + r.project, cats.expense);
+  return r;
+}
+async function readOne(f, mode){
+  const isPdf = /pdf$/i.test(f.type) || /\.pdf$/i.test(f.name);
+  if (!isPdf && !/^image\//.test(f.type)) return blankRow(f.name, '不支援的檔案格式（請用 PDF 或照片）', mode);
+  let preview = '', r = null;
+  try {
+    if (isPdf){
+      const { pdf, annot, text } = await readPdf(f);
+      preview = await pdfPageToJpeg(pdf);
+      const parsed = parseInvoice(annot, text, f.name, cats.income);
+      if (mode === 'expense'){
+        // 廠商的發票、請款單格式各不相同，一律交給 AI；AI 失敗時才用文字辨識結果
+        try { r = await aiRead(preview, f.name, mode); }
+        catch(err){ console.error(err); r = textAsExpense(parsed); r.warn.push('AI 辨識失敗：' + (err.message || err)); }
+      } else {
+        r = parsed; r.type = 'income'; r.invoice = ''; r.status = 'pending';
+        if (!r.amount){                                 // 掃描檔或沒有文字：交給 AI
+          try { r = await aiRead(preview, f.name, mode); }
+          catch(err){ console.error(err); r.warn.push('AI 辨識失敗：' + (err.message || err)); }
+        }
+      }
+    } else {
+      preview = await imageToJpeg(f);
+      try { r = await aiRead(preview, f.name, mode); }
+      catch(err){ console.error(err); r = blankRow(f.name, 'AI 辨識失敗：' + (err.message || err) + '，請對照照片手動輸入', mode); }
+    }
+  } catch(err){ console.error(err); r = r || blankRow(f.name, '無法讀取此檔案', mode); }
+  r.preview = preview;
+  return r;
+}
+function startImport(mode){
+  if (!window.pdfjsLib) return alert('PDF 讀取元件載入失敗，請重新整理頁面');
+  state.impMode = mode;
+  $('#impFile').value = ''; $('#impFile').click();
+}
+$('#impBtn').onclick = () => startImport('income');
+$('#impExpBtn').onclick = () => startImport('expense');
 $('#impFile').onchange = async e => {
   const files = [...e.target.files]; if (!files.length) return;
-  $('#mBusy').textContent = '讀取公司請款…';
-  const out = [];
-  for (const f of files){
-    try { const { annot, text } = await readPdf(f); out.push(parseInvoice(annot, text, f.name, cats.income)); }
-    catch(err){ console.error(err); out.push({ file:f.name, invType:'三聯式', date:'', party:'', contact:'', item:'', project:'', amount:0, amountExcl:0, category:cats.income[0], warn:['無法讀取此 PDF'] }); }
+  const mode = state.impMode || 'income', out = [];
+  $('#impTitle').textContent = mode === 'expense' ? '匯入支出' : '匯入公司請款';
+  for (let i = 0; i < files.length; i++){
+    $('#mBusy').textContent = `辨識中 ${i + 1}／${files.length}：${files[i].name}`;
+    out.push(await readOne(files[i], mode));
   }
-  // 重複檢查：同日期、同含稅金額
+  $('#mBusy').textContent = '檢查是否重複…';
   for (const r of out){
-    if (!r.date || !r.amount) continue;
-    try { const snap = await db.collection(COL).where('date','==',r.date).get();
-      if (snap.docs.some(d => d.data().type==='income' && +d.data().amount === r.amount)) { r.dup = true; r.warn.push(`已匯入過：${+r.date.slice(0,4)} 年 ${+r.date.slice(5,7)} 月已有同日期、同金額的收入（預設不勾選）`); }
+    try {
+      if (r.invoice){
+        const snap = await db.collection(COL).where('invoice','==',r.invoice).get();
+        if (!snap.empty){ const d = snap.docs[0].data(); r.dup = true; r.warn.unshift(`發票 ${r.invoice} 已匯入過（${d.date}，${money(+d.amount)}），預設不勾選`); }
+      } else if (r.date && r.amount){
+        const snap = await db.collection(COL).where('date','==',r.date).get();
+        if (snap.docs.some(d => d.data().type === r.type && +d.data().amount === r.amount)){ r.dup = true; r.warn.unshift(`已匯入過：${r.date} 已有同金額的${r.type==='income'?'收入':'支出'}，預設不勾選`); }
+      }
     } catch(err){ console.warn(err); }
   }
   $('#mBusy').textContent = '';
   state.imports = out; renderImports(); $('#importDlg').showModal();
 };
-function impTaxText(r){ return `稅額 ${money(r.amount - r.amountExcl)}`; }
+function impTaxText(r){ return `未稅 ${money(r.amountExcl)} ＋ 稅額 ${money(r.amount - r.amountExcl)} ＝ 含稅 ${money(r.amount)}`; }
+function impOpt(list, v){ return (v && !list.includes(v) ? [...list, v] : list).map(o => `<option ${o===v?'selected':''}>${esc(o)}</option>`).join(''); }
+function impStatusOpts(r){
+  const inc = r.type === 'income';
+  return `<option value="pending" ${r.status!=='done'?'selected':''}>${inc?'未收款':'未付款'}</option><option value="done" ${r.status==='done'?'selected':''}>${inc?'已收款':'已付款'}</option>`;
+}
 function renderImports(){
-  const opt = (list, v) => (v && !list.includes(v) ? [...list, v] : list).map(o => `<option ${o===v?'selected':''}>${esc(o)}</option>`).join('');
   $('#impList').innerHTML = state.imports.map((r, i) => `<div class="imp-row${r.dup?' off':''}" data-i="${i}">
-    <div class="imp-head"><input type="checkbox" class="imp-on" ${r.dup?'':'checked'}><b>${esc(r.file)}</b></div>
-    <div class="imp-grid">
-      <label>發票日期<input type="date" data-k="date" value="${esc(r.date)}"></label>
-      <label>發票類型<select data-k="invType">${opt(INV_TYPES, r.invType)}</select></label>
-      <label>分類<select data-k="category">${opt(cats.income, r.category)}</select></label>
-      <label>狀態<select data-k="status"><option value="pending" selected>未收款</option><option value="done">已收款</option></select></label>
-      <label class="w2">抬頭（客戶）<input data-k="party" value="${esc(r.party)}"></label>
-      <label class="w2">收件人／聯絡人<input data-k="contact" value="${esc(r.contact)}"></label>
-      <label class="w4">項目<input data-k="item" value="${esc(r.item)}"></label>
-      <label class="w2">專案名稱<input data-k="project" value="${esc(r.project)}"></label>
-      <label>未稅金額<input data-k="amountExcl" inputmode="numeric" value="${r.amountExcl?fmt(r.amountExcl):''}"></label>
-      <label>含稅金額<input data-k="amount" inputmode="numeric" value="${r.amount?fmt(r.amount):''}"></label>
+    <div class="imp-head"><input type="checkbox" class="imp-on" ${r.dup?'':'checked'}><b>${esc(r.file)}</b>${r.ai?'<span class="tag pending">AI 辨識</span>':''}</div>
+    <div class="imp-body">
+      ${r.preview?`<img class="imp-img" src="${r.preview}" alt="發票預覽" title="點一下放大／縮小">`:'<div></div>'}
+      <div class="imp-grid">
+        <label>類型<select data-k="type"><option value="income" ${r.type==='income'?'selected':''}>收入（公司請款）</option><option value="expense" ${r.type==='expense'?'selected':''}>支出（進項發票）</option></select></label>
+        <label>發票日期<input type="date" data-k="date" value="${esc(r.date)}"></label>
+        <label>發票類型<select data-k="invType">${impOpt(INV_TYPES, r.invType)}</select></label>
+        <label>發票號碼<input data-k="invoice" value="${esc(r.invoice || '')}" placeholder="例：CA15119350"></label>
+        <label class="w2"><span class="pl">${r.type==='income'?'抬頭（客戶）':'賣方（廠商）'}</span><input data-k="party" value="${esc(r.party)}"></label>
+        <label>分類<select data-k="category">${impOpt(r.type==='income'?cats.income:cats.expense, r.category)}</select></label>
+        <label>狀態<select data-k="status">${impStatusOpts(r)}</select></label>
+        <label class="w2">專案名稱<input data-k="project" value="${esc(r.project)}"></label>
+        <label class="w2">項目<input data-k="item" value="${esc(r.item)}"></label>
+        <label class="w2">收件人／聯絡人<input data-k="contact" value="${esc(r.contact)}"></label>
+        <label>未稅金額<input data-k="amountExcl" inputmode="numeric" value="${r.amountExcl?fmt(r.amountExcl):''}"></label>
+        <label>含稅金額<input data-k="amount" inputmode="numeric" value="${r.amount?fmt(r.amount):''}"></label>
+      </div>
     </div>
-    <div class="imp-info"><span class="tax">${impTaxText(r)}</span>${r.warn.map(w => `　<span class="w">⚠ ${esc(w)}</span>`).join('')}</div>
+    <div class="imp-info"><span class="tax">${impTaxText(r)}</span>${r.warn.map(w => `<div class="w">⚠ ${esc(w)}</div>`).join('')}</div>
   </div>`).join('');
 }
+$('#impList').addEventListener('click', e => { if (e.target.classList.contains('imp-img')) e.target.closest('.imp-body').classList.toggle('zoom'); });
 $('#impList').addEventListener('input', e => {
   const row = e.target.closest('.imp-row'); if (!row) return;
   if (e.target.classList.contains('imp-on')){ row.classList.toggle('off', !e.target.checked); return; }
   const r = state.imports[row.dataset.i], k = e.target.dataset.k; if (!k) return;
   if (k === 'amount' || k === 'amountExcl') r[k] = NUM(e.target.value); else r[k] = e.target.value;
+  if (k === 'invoice') r.invoice = e.target.value.replace(/[\s\-]/g, '').toUpperCase();
+  if (k === 'type'){
+    const list = r.type === 'income' ? cats.income : cats.expense;
+    r.category = r.type === 'income' ? guessCat(r.item, list) : guessExpCat(r.item, list);
+    row.querySelector('[data-k=category]').innerHTML = impOpt(list, r.category);
+    row.querySelector('[data-k=status]').innerHTML = impStatusOpts(r);
+    row.querySelector('.pl').textContent = r.type === 'income' ? '抬頭（客戶）' : '賣方（廠商）';
+  }
   if (k === 'amount' || k === 'invType'){
     r.amountExcl = exclFrom(r.amount, r.invType);
     row.querySelector('[data-k=amountExcl]').value = r.amountExcl ? fmt(r.amountExcl) : '';
@@ -757,14 +897,15 @@ $('#impList').addEventListener('input', e => {
 $('#impCancel').onclick = () => $('#importDlg').close();
 $('#impSave').onclick = async () => {
   const rows = [...document.querySelectorAll('#impList .imp-row')].filter(el => el.querySelector('.imp-on').checked).map(el => state.imports[el.dataset.i]);
-  if (!rows.length) return alert('沒有勾選要匯入的公司請款');
+  if (!rows.length) return alert('沒有勾選要匯入的資料');
   const bad = rows.find(r => !(r.amount > 0) || !/^\d{4}-\d{2}-\d{2}$/.test(r.date));
   if (bad) return alert(`「${bad.file}」的日期或金額不完整，請補上後再匯入`);
   const batch = db.batch(), who = auth.currentUser.email, ids = [];
   rows.forEach(r => { const ref = db.collection(COL).doc(); ids.push(ref.id); batch.set(ref, {
-    type:'income', date:r.date, amount:r.amount, amountExcl:r.amountExcl || exclFrom(r.amount, r.invType), invType:r.invType,
-    category:r.category, status:r.status || 'pending', method:'匯款', item:(r.item || r.project).trim(), project:r.project.trim(),
-    party:r.party.trim(), contact:r.contact.trim(), invoice:'', note:`匯入自請款單：${r.file}`, source:'invoice-import',
+    type:r.type, date:r.date, amount:r.amount, amountExcl:r.amountExcl || exclFrom(r.amount, r.invType), invType:r.invType,
+    category:r.category, status:r.status || 'pending', method:'匯款', item:(r.item || r.project || '').trim(), project:(r.project || '').trim(),
+    party:(r.party || '').trim(), contact:(r.contact || '').trim(), invoice:r.invoice || '',
+    note:`匯入自：${r.file}${r.ai ? '（AI 辨識）' : ''}`, source: r.ai ? 'ai-import' : 'invoice-import',
     createdAt:TS(), createdBy:who, updatedAt:TS(), updatedBy:who
   }); });
   try {
@@ -773,7 +914,7 @@ $('#impSave').onclick = async () => {
     const byMonth = {}; rows.forEach(r => { const k = `${+r.date.slice(0,4)}/${+r.date.slice(5,7)}`; byMonth[k] = (byMonth[k]||0) + 1; });
     const summary = Object.entries(byMonth).map(([k,n]) => `${k} 月 ${n} 筆`).join('、');
     switchView(rows.every(r => r.status === 'done') ? 'year' : 'pending');
-    alert(`已匯入 ${rows.length} 筆公司請款（依發票日期）：${summary}\n\n請到對應月份的月報表查看；剛匯入的紀錄會以黃色標示。`);
+    alert(`已匯入 ${rows.length} 筆${state.impMode === 'expense' ? '支出' : '公司請款'}（依發票日期）：${summary}\n\n請到對應月份的月報表查看；剛匯入的紀錄會以黃色標示。`);
   }
   catch(err){ handleErr(err); }
 };
@@ -821,6 +962,42 @@ auth.onAuthStateChanged(async u => {
   $('#login').hidden = !!u; $('#app').hidden = !u;
   if (u){ $('#userEmail').textContent = u.email; await loadCats(); switchView(state.view); }
 });
+</script>
+<script type="module">
+/* ===== AI 辨識發票（Firebase AI Logic・Google Cloud 付費服務，資料不用於訓練） ===== */
+try {
+  const { initializeApp } = await import('https://www.gstatic.com/firebasejs/13.2.0/firebase-app.js');
+  const { getAI, getGenerativeModel, AgentPlatformBackend } = await import('https://www.gstatic.com/firebasejs/13.2.0/firebase-ai.js');
+  const app = initializeApp(window.FIREBASE_CONFIG, 'invoice-ai');
+  const ai = getAI(app, { backend: new AgentPlatformBackend('global') });
+  const S = { type: 'string' }, I = { type: 'integer' };
+  const schema = { type: 'object', properties: {
+    docKind: { type: 'string', enum: ['統一發票', '請款單', '收據', '其他'] },
+    invoiceNo: S, invType: { type: 'string', enum: ['三聯式', '二聯式', '電子發票', '收據／免稅', '無'] },
+    date: S, sellerName: S, sellerTaxId: S, buyerName: S, buyerTaxId: S, item: S, contact: S,
+    amountExcl: I, tax: I, amount: I, uncertain: { type: 'array', items: S }
+  }, required: ['docKind','invoiceNo','invType','date','sellerName','sellerTaxId','buyerName','buyerTaxId','item','contact','amountExcl','tax','amount','uncertain'] };
+  const model = getGenerativeModel(ai, { model: 'gemini-3.8-flash',
+    generationConfig: { responseMimeType: 'application/json', responseJsonSchema: schema, temperature: 0 } });
+  const PROMPT = `你是台灣的會計助理。請讀取這張台灣統一發票、請款單或收據（可能是手寫、拍照或掃描），依指定欄位回傳 JSON。
+本公司：圖威創意股份有限公司，統一編號 54071585。
+規則：
+- date：開立日期，民國年請加 1911 轉為西元，格式 YYYY-MM-DD；只有「七、八月份」這類期別而沒有日期時，填該期別第一天。
+- invoiceNo：發票號碼（2 碼英文＋8 碼數字，例如 CA15119350），沒有則填空字串。
+- invType：依發票標題判斷三聯式、二聯式或電子發票；營業稅勾選「免稅」或「零稅率」，或屬於收據時填「收據／免稅」。
+- amountExcl＝銷售額合計（未稅），tax＝營業稅，amount＝總計（含稅），只填整數。只看得到含稅金額時，amountExcl 與 tax 填 0。
+- 手寫數字請用「總計新臺幣（中文大寫）」核對，並確認 銷售額＋營業稅＝總計。
+- sellerName／sellerTaxId 為開立發票的賣方（通常是蓋「統一發票專用章」的公司）；buyerName／buyerTaxId 為買受人。
+- item：品名摘要，多個品名用「、」連接。contact：收件人或聯絡人姓名，沒有則空字串。
+- 看不清楚或不確定的欄位，把欄位的中文名稱（例如「總計」「發票號碼」）放進 uncertain。看不到的欄位填空字串或 0，不要猜測。`;
+  window.aiReadInvoice = async (base64, mimeType) => {
+    const res = await model.generateContent([{ type: 'text', text: PROMPT }, { type: 'inlineData', inlineData: { mimeType, data: base64 } }]);
+    return JSON.parse(res.response.text());
+  };
+} catch (err) {
+  console.error(err);
+  window.aiLoadError = 'AI 元件載入失敗：' + (err.message || err);
+}
 </script>
 </body>
 </html>
