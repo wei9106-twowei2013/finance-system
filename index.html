@@ -503,7 +503,7 @@ $('#saveCats').onclick = async () => {
 };
 
 /* ===== 新增／編輯 ===== */
-const F = n => $('#entryForm').elements[n];
+const F = n => $('#entryForm').elements.namedItem(n);
 function fillSelect(sel, list, val){
   const opts = val && !list.includes(val) ? [...list, val] : list;
   sel.innerHTML = opts.map(o=>`<option ${o===val?'selected':''}>${esc(o)}</option>`).join('');
