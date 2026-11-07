@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>圖威營收支出系統</title>
+<link rel="apple-touch-icon" href="icon-finance.png">
+<link rel="icon" type="image/png" href="icon-finance.png">
+<meta name="apple-mobile-web-app-title" content="圖威收支">
 <style>
 :root{
   --bg:#f4f5f7;--card:#fff;--ink:#1f2328;--sub:#6b7280;--line:#e3e6ea;
@@ -115,6 +118,7 @@ dialog::backdrop{background:rgba(20,25,35,.45)}
 
 .settings textarea{width:100%;min-height:260px;line-height:1.7}
 .hint{font-size:13px;color:var(--sub);margin:0 0 8px}
+tr.new td{background:#fff8db}
 .imp-row{border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px}
 .imp-row.off{opacity:.45}
 .imp-head{display:flex;gap:8px;align-items:center;margin-bottom:8px;font-size:13px}
@@ -337,7 +341,7 @@ function handleErr(e){
 }
 
 const state = { view:'month', ym: today().slice(0,7), year: +today().slice(0,4),
-  monthRows:[], yearRows:[], prevRows:[], pendingRows:[], byId:{}, editId:null, imports:[], exclManual:false };
+  monthRows:[], yearRows:[], prevRows:[], pendingRows:[], byId:{}, editId:null, imports:[], exclManual:false, justImported:[] };
 
 function remember(rows){ rows.forEach(r => state.byId[r.id] = r); return rows; }
 async function fetchRange(from, to){
@@ -359,7 +363,7 @@ function catBlock(rows, type){
 }
 function rowHtml(x, showYear){
   const pend = x.status === 'pending';
-  return `<tr>
+  return `<tr class="${state.justImported.includes(x.id)?'new':''}">
     <td>${esc(showYear ? x.date : x.date.slice(5))}</td>
     <td><span class="tag ${x.type}">${x.type==='income'?'收入':'支出'}</span></td>
     <td>${esc(x.category)}</td>
@@ -706,7 +710,7 @@ $('#impFile').onchange = async e => {
   for (const r of out){
     if (!r.date || !r.amount) continue;
     try { const snap = await db.collection(COL).where('date','==',r.date).get();
-      if (snap.docs.some(d => d.data().type==='income' && +d.data().amount === r.amount)) { r.dup = true; r.warn.push('系統中已有同日期、同金額的收入，可能重複'); }
+      if (snap.docs.some(d => d.data().type==='income' && +d.data().amount === r.amount)) { r.dup = true; r.warn.push(`已匯入過：${+r.date.slice(0,4)} 年 ${+r.date.slice(5,7)} 月已有同日期、同金額的收入（預設不勾選）`); }
     } catch(err){ console.warn(err); }
   }
   $('#mBusy').textContent = '';
@@ -749,14 +753,21 @@ $('#impSave').onclick = async () => {
   if (!rows.length) return alert('沒有勾選要匯入的請款單');
   const bad = rows.find(r => !(r.amount > 0) || !/^\d{4}-\d{2}-\d{2}$/.test(r.date));
   if (bad) return alert(`「${bad.file}」的日期或金額不完整，請補上後再匯入`);
-  const batch = db.batch(), who = auth.currentUser.email;
-  rows.forEach(r => batch.set(db.collection(COL).doc(), {
+  const batch = db.batch(), who = auth.currentUser.email, ids = [];
+  rows.forEach(r => { const ref = db.collection(COL).doc(); ids.push(ref.id); batch.set(ref, {
     type:'income', date:r.date, amount:r.amount, amountExcl:r.amountExcl || exclFrom(r.amount, r.invType), invType:r.invType,
     category:r.category, status:r.status || 'pending', method:'匯款', item:(r.item || r.project).trim(), project:r.project.trim(),
     party:r.party.trim(), contact:r.contact.trim(), invoice:'', note:`匯入自請款單：${r.file}`, source:'invoice-import',
     createdAt:TS(), createdBy:who, updatedAt:TS(), updatedBy:who
-  }));
-  try { await batch.commit(); $('#importDlg').close(); toast(`已匯入 ${rows.length} 筆請款`); state.ym = rows[0].date.slice(0,7); switchView('month'); }
+  }); });
+  try {
+    await batch.commit(); $('#importDlg').close();
+    state.justImported = ids;
+    const byMonth = {}; rows.forEach(r => { const k = `${+r.date.slice(0,4)}/${+r.date.slice(5,7)}`; byMonth[k] = (byMonth[k]||0) + 1; });
+    const summary = Object.entries(byMonth).map(([k,n]) => `${k} 月 ${n} 筆`).join('、');
+    switchView(rows.every(r => r.status === 'done') ? 'year' : 'pending');
+    alert(`已匯入 ${rows.length} 筆請款（依發票日期）：${summary}\n\n請到對應月份的月報表查看；剛匯入的紀錄會以黃色標示。`);
+  }
   catch(err){ handleErr(err); }
 };
 
