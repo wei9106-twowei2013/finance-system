@@ -1,0 +1,583 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>圖威營收支出系統</title>
+<style>
+:root{
+  --bg:#f4f5f7;--card:#fff;--ink:#1f2328;--sub:#6b7280;--line:#e3e6ea;
+  --brand:#2b3a55;--in:#0f8a6a;--in-bg:#e5f5ef;--ex:#d0542c;--ex-bg:#fcebe4;
+  --warn:#b7791f;--warn-bg:#fdf3dc;--radius:12px;
+  font-family:"Microsoft JhengHei","微軟正黑體","PingFang TC","Heiti TC","黑體-繁","Noto Sans TC",sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-size:15px}
+button,input,select,textarea{font:inherit}
+button{cursor:pointer;border:1px solid var(--line);background:#fff;border-radius:8px;padding:7px 12px;color:var(--ink)}
+button:hover{border-color:#b8bec7}
+button.primary{background:var(--brand);color:#fff;border-color:var(--brand)}
+button.in{background:var(--in);color:#fff;border-color:var(--in)}
+button.ex{background:var(--ex);color:#fff;border-color:var(--ex)}
+input,select,textarea{border:1px solid var(--line);border-radius:8px;padding:7px 10px;background:#fff;color:var(--ink);min-width:0}
+input:focus,select:focus,textarea:focus{outline:2px solid #9fb3d9;border-color:transparent}
+[hidden]{display:none!important}
+
+/* login */
+#login{min-height:100vh;display:grid;place-items:center;padding:16px}
+.login-box{background:var(--card);padding:32px;border-radius:var(--radius);width:100%;max-width:360px;box-shadow:0 4px 24px rgba(0,0,0,.06)}
+.login-box h1{margin:0 0 4px;font-size:22px}
+.login-box p{margin:0 0 20px;color:var(--sub);font-size:13px}
+.login-box input{width:100%;margin-bottom:10px}
+.login-box button{width:100%}
+.err{color:var(--ex);font-size:13px;min-height:18px;margin-top:8px}
+
+/* header */
+header{background:var(--brand);color:#fff;padding:0 16px}
+.hd{max-width:1200px;margin:0 auto;display:flex;align-items:center;gap:16px;flex-wrap:wrap;min-height:56px}
+.hd h1{font-size:18px;margin:0;white-space:nowrap}
+nav{display:flex;gap:4px;flex:1;flex-wrap:wrap}
+nav button{background:transparent;border:0;color:#c9d2e3;padding:16px 12px;border-radius:0;border-bottom:3px solid transparent}
+nav button.on{color:#fff;border-bottom-color:#fff}
+.user{font-size:13px;color:#c9d2e3;display:flex;gap:8px;align-items:center}
+.user button{background:transparent;color:#fff;border-color:#55688c;padding:4px 10px}
+
+main{max-width:1200px;margin:0 auto;padding:20px 16px 60px}
+.toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
+.toolbar .spacer{flex:1}
+.period{font-size:20px;font-weight:700;margin:0 4px}
+.busy{color:var(--sub);font-size:13px}
+
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px}
+.card{background:var(--card);border-radius:var(--radius);padding:16px}
+.card .lb{font-size:13px;color:var(--sub)}
+.card .v{font-size:24px;font-weight:700;margin-top:4px;font-variant-numeric:tabular-nums}
+.card .s{font-size:12px;color:var(--sub);margin-top:4px}
+.v.in{color:var(--in)}.v.ex{color:var(--ex)}.v.neg{color:var(--ex)}.v.warn{color:var(--warn)}
+.up{color:var(--in)}.down{color:var(--ex)}
+
+.panel{background:var(--card);border-radius:var(--radius);padding:16px;margin-bottom:16px}
+.panel h2{font-size:15px;margin:0 0 12px;display:flex;align-items:center;gap:8px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:760px){.grid2{grid-template-columns:1fr}}
+
+.cat{margin-bottom:10px}
+.cat-top{display:flex;justify-content:space-between;font-size:14px;margin-bottom:4px;gap:8px}
+.cat-top small{color:var(--sub)}
+.bar{height:8px;background:#eef0f3;border-radius:4px;overflow:hidden}
+.bar i{display:block;height:100%;border-radius:4px}
+.bar i.income{background:var(--in)}.bar i.expense{background:var(--ex)}
+.empty{color:var(--sub);font-size:14px;margin:8px 0}
+
+.filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.filters input{flex:1;min-width:160px}
+.tbl-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{padding:9px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{color:var(--sub);font-weight:600;font-size:13px;white-space:nowrap;background:#fafbfc}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.num.income{color:var(--in)}td.num.expense{color:var(--ex)}
+td.item{min-width:160px}
+.note{font-size:12px;color:var(--sub);margin-top:2px}
+.tag{display:inline-block;font-size:12px;padding:2px 8px;border-radius:10px;white-space:nowrap}
+.tag.income{background:var(--in-bg);color:var(--in)}
+.tag.expense{background:var(--ex-bg);color:var(--ex)}
+.tag.pending{background:var(--warn-bg);color:var(--warn)}
+.ok{color:var(--in)}
+.ops{white-space:nowrap}
+.ops button{padding:3px 8px;font-size:12px;margin-left:2px}
+tfoot td{font-weight:700;background:#fafbfc}
+tr.click{cursor:pointer}tr.click:hover td{background:#f6f8fb}
+.neg-t{color:var(--ex)}
+
+.chart{width:100%;height:auto;display:block}
+.chart .grid{stroke:#eceef1}
+.chart .ax{font-size:11px;fill:#8a919b}
+.chart .b-in{fill:var(--in)}.chart .b-ex{fill:var(--ex)}
+.legend{display:flex;gap:16px;font-size:13px;color:var(--sub);font-weight:400}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+
+/* dialog */
+dialog{border:0;border-radius:var(--radius);padding:0;width:min(560px,calc(100% - 32px));box-shadow:0 10px 40px rgba(0,0,0,.2)}
+dialog::backdrop{background:rgba(20,25,35,.45)}
+.dlg-h{padding:16px 20px;border-bottom:1px solid var(--line);font-weight:700;font-size:16px}
+.dlg-b{padding:16px 20px;display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.dlg-b label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--sub)}
+.dlg-b .full{grid-column:1/-1}
+.dlg-f{padding:12px 20px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:8px}
+.seg{display:flex;gap:0;grid-column:1/-1}
+.seg label{flex:1;flex-direction:row;justify-content:center;border:1px solid var(--line);padding:8px;cursor:pointer;color:var(--ink);font-size:15px}
+.seg label:first-child{border-radius:8px 0 0 8px}.seg label:last-child{border-radius:0 8px 8px 0}
+.seg input{display:none}
+.seg label:has(input[value=income]:checked){background:var(--in);color:#fff;border-color:var(--in)}
+.seg label:has(input[value=expense]:checked){background:var(--ex);color:#fff;border-color:var(--ex)}
+@media(max-width:520px){.dlg-b{grid-template-columns:1fr}}
+
+.settings textarea{width:100%;min-height:260px;line-height:1.7}
+.hint{font-size:13px;color:var(--sub);margin:0 0 8px}
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#1f2328;color:#fff;padding:10px 18px;border-radius:8px;font-size:14px;opacity:0;transition:.2s;pointer-events:none}
+#toast.show{opacity:1}
+</style>
+</head>
+<body>
+
+<!-- 登入 -->
+<div id="login" hidden>
+  <form class="login-box" id="loginForm">
+    <h1>圖威營收支出系統</h1>
+    <p>請以授權帳號登入</p>
+    <input type="email" id="email" placeholder="Email" required autocomplete="username">
+    <input type="password" id="pw" placeholder="密碼" required autocomplete="current-password">
+    <button class="primary" type="submit">登入</button>
+    <div class="err" id="loginErr"></div>
+  </form>
+</div>
+
+<!-- 主程式 -->
+<div id="app" hidden>
+  <header><div class="hd">
+    <h1>圖威營收支出</h1>
+    <nav>
+      <button data-view="month" class="on">月報表</button>
+      <button data-view="year">年報表</button>
+      <button data-view="pending">未收付款</button>
+      <button data-view="settings">分類設定</button>
+    </nav>
+    <div class="user"><span id="userEmail"></span><button id="logout">登出</button></div>
+  </div></header>
+
+  <main>
+    <!-- 月報表 -->
+    <section id="v-month">
+      <div class="toolbar">
+        <button id="mPrev" aria-label="上個月">◀</button>
+        <input type="month" id="monthPick">
+        <button id="mNext" aria-label="下個月">▶</button>
+        <span class="busy" id="mBusy"></span>
+        <span class="spacer"></span>
+        <button class="in" data-new="income">＋ 收入</button>
+        <button class="ex" data-new="expense">＋ 支出</button>
+        <button id="mCsv">匯出 CSV</button>
+      </div>
+      <div class="cards" id="mCards"></div>
+      <div class="grid2">
+        <div class="panel"><h2>收入分類</h2><div id="mCatIn"></div></div>
+        <div class="panel"><h2>支出分類</h2><div id="mCatEx"></div></div>
+      </div>
+      <div class="panel">
+        <h2>本月明細</h2>
+        <div class="filters">
+          <select id="fType"><option value="">全部類型</option><option value="income">收入</option><option value="expense">支出</option></select>
+          <select id="fCat"><option value="">全部分類</option></select>
+          <select id="fStatus"><option value="">全部狀態</option><option value="done">已收付</option><option value="pending">未收付</option></select>
+          <input id="fSearch" placeholder="搜尋項目、專案、客戶/廠商、發票號碼、備註…">
+        </div>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>日期</th><th>類型</th><th>分類</th><th>項目</th><th>專案／對象</th><th>方式／單據</th><th>狀態</th><th class="num">金額</th><th></th></tr></thead>
+          <tbody id="mBody"></tbody>
+          <tfoot id="mFoot"></tfoot>
+        </table></div>
+      </div>
+    </section>
+
+    <!-- 年報表 -->
+    <section id="v-year" hidden>
+      <div class="toolbar">
+        <button id="yPrev" aria-label="前一年">◀</button>
+        <span class="period" id="yLabel"></span>
+        <button id="yNext" aria-label="後一年">▶</button>
+        <span class="busy" id="yBusy"></span>
+        <span class="spacer"></span>
+        <button id="yCsv">匯出全年 CSV</button>
+      </div>
+      <div class="cards" id="yCards"></div>
+      <div class="panel">
+        <h2>每月收支 <span class="legend"><span><i style="background:var(--in)"></i>收入</span><span><i style="background:var(--ex)"></i>支出</span></span></h2>
+        <div id="yChart"></div>
+      </div>
+      <div class="panel">
+        <h2>月份彙總 <span class="hint" style="margin:0;font-weight:400">（點月份可查看明細）</span></h2>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>月份</th><th class="num">收入</th><th class="num">支出</th><th class="num">淨額</th><th class="num">累計淨額</th><th class="num">去年同月淨額</th></tr></thead>
+          <tbody id="yBody"></tbody><tfoot id="yFoot"></tfoot>
+        </table></div>
+      </div>
+      <div class="grid2">
+        <div class="panel"><h2>全年收入分類</h2><div id="yCatIn"></div></div>
+        <div class="panel"><h2>全年支出分類</h2><div id="yCatEx"></div></div>
+      </div>
+    </section>
+
+    <!-- 未收付款 -->
+    <section id="v-pending" hidden>
+      <div class="toolbar"><span class="period">未收付款追蹤</span><span class="busy" id="pBusy"></span></div>
+      <div class="cards" id="pCards"></div>
+      <div class="panel">
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>日期</th><th>類型</th><th>分類</th><th>項目</th><th>專案／對象</th><th>方式／單據</th><th>狀態</th><th class="num">金額</th><th></th></tr></thead>
+          <tbody id="pBody"></tbody>
+        </table></div>
+      </div>
+    </section>
+
+    <!-- 分類設定 -->
+    <section id="v-settings" hidden class="settings">
+      <div class="toolbar"><span class="period">分類設定</span><span class="spacer"></span><button class="primary" id="saveCats">儲存分類</button></div>
+      <p class="hint">每行一個分類。修改分類名稱不會改動舊紀錄，舊紀錄仍保留原分類名稱。</p>
+      <div class="grid2">
+        <div class="panel"><h2>收入分類</h2><textarea id="catIn"></textarea></div>
+        <div class="panel"><h2>支出分類</h2><textarea id="catEx"></textarea></div>
+      </div>
+      <div class="panel"><h2>收付方式</h2><textarea id="catMethod" style="min-height:120px"></textarea></div>
+    </section>
+  </main>
+</div>
+
+<!-- 新增／編輯 -->
+<dialog id="entryDlg">
+  <form id="entryForm">
+    <div class="dlg-h" id="dlgTitle">新增紀錄</div>
+    <div class="dlg-b">
+      <div class="seg">
+        <label><input type="radio" name="type" value="income">收入</label>
+        <label><input type="radio" name="type" value="expense">支出</label>
+      </div>
+      <label>日期<input type="date" name="date" required></label>
+      <label>金額（元，含稅）<input name="amount" inputmode="numeric" required placeholder="例：50000"></label>
+      <label>分類<select name="category"></select></label>
+      <label>狀態<select name="status"><option value="done">已收／已付</option><option value="pending">未收／未付</option></select></label>
+      <label class="full">項目說明<input name="item" required placeholder="例：《非關公民》展覽輸出第二期款"></label>
+      <label>專案名稱<input name="project" list="projList" placeholder="可留空"></label>
+      <label>客戶／廠商<input name="party" list="partyList" placeholder="可留空"></label>
+      <label>收付方式<select name="payMethod"></select></label>
+      <label>發票／單據號碼<input name="invoice" placeholder="可留空"></label>
+      <label class="full">備註<textarea name="note" rows="2"></textarea></label>
+    </div>
+    <div class="dlg-f">
+      <button type="button" id="dlgCancel">取消</button>
+      <button type="submit" class="primary">儲存</button>
+    </div>
+  </form>
+  <datalist id="projList"></datalist><datalist id="partyList"></datalist>
+</dialog>
+<div id="toast"></div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script>
+/* ===== Firebase 設定：請貼上與成本統計系統相同的 firebaseConfig ===== */
+const firebaseConfig = {
+  apiKey: "請貼上",
+  authDomain: "twowei-progresstrack.firebaseapp.com",
+  projectId: "twowei-progresstrack",
+  storageBucket: "請貼上",
+  messagingSenderId: "請貼上",
+  appId: "請貼上"
+};
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth(), db = firebase.firestore();
+const COL = 'finance_entries', SET = 'finance_settings';
+const TS = () => firebase.firestore.FieldValue.serverTimestamp();
+
+/* ===== 預設分類 ===== */
+const DEFAULTS = {
+  income: ['展覽製作','印刷輸出','工程施作','設計規劃','策展研究','其他收入'],
+  expense: ['材料費','印刷輸出費','外包工資','人事薪資','勞健保','租金','水電瓦斯','交通油資','餐費','設備器材','軟體訂閱','稅捐','雜支'],
+  methods: ['匯款','現金','支票','信用卡']
+};
+let cats = JSON.parse(JSON.stringify(DEFAULTS));
+
+/* ===== 工具 ===== */
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt = n => (Math.round(+n) || 0).toLocaleString('zh-TW');
+const money = n => (n < 0 ? '-$' : '$') + fmt(Math.abs(n));
+const pad = n => String(n).padStart(2, '0');
+const today = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; };
+const sum = (rows, type) => rows.filter(r => r.type === type).reduce((a, r) => a + (+r.amount || 0), 0);
+const pct = (a, b) => b ? ((a - b) / Math.abs(b) * 100) : null;
+function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('show'),1800); }
+function handleErr(e){
+  console.error(e);
+  if (e && e.code === 'permission-denied')
+    alert('此帳號沒有讀寫營收資料的權限。\n請確認 Firestore 規則已加入此 UID：\n' + (auth.currentUser?.uid || ''));
+  else alert('發生錯誤：' + (e?.message || e));
+}
+
+const state = { view:'month', ym: today().slice(0,7), year: +today().slice(0,4),
+  monthRows:[], yearRows:[], prevRows:[], pendingRows:[], byId:{}, editId:null };
+
+function remember(rows){ rows.forEach(r => state.byId[r.id] = r); return rows; }
+async function fetchRange(from, to){
+  const snap = await db.collection(COL).where('date','>=',from).where('date','<=',to).orderBy('date').get();
+  return remember(snap.docs.map(d => ({ id:d.id, ...d.data() })));
+}
+
+/* ===== 共用元件 ===== */
+function cards(list){
+  return list.map(c => `<div class="card"><div class="lb">${c.label}</div><div class="v ${c.cls||''}">${c.value}</div>${c.sub?`<div class="s">${c.sub}</div>`:''}</div>`).join('');
+}
+function catBlock(rows, type){
+  const m = {};
+  rows.filter(r => r.type === type).forEach(r => { const k = r.category || '未分類'; m[k] = (m[k]||0) + (+r.amount||0); });
+  const list = Object.entries(m).sort((a,b) => b[1]-a[1]);
+  if (!list.length) return '<p class="empty">尚無資料</p>';
+  const total = list.reduce((a,x) => a+x[1], 0);
+  return list.map(([c,v]) => `<div class="cat"><div class="cat-top"><span>${esc(c)}</span><span>${money(v)} <small>${(v/total*100).toFixed(1)}%</small></span></div><div class="bar"><i class="${type}" style="width:${(v/list[0][1]*100).toFixed(1)}%"></i></div></div>`).join('');
+}
+function rowHtml(x, showYear){
+  const pend = x.status === 'pending';
+  return `<tr>
+    <td>${esc(showYear ? x.date : x.date.slice(5))}</td>
+    <td><span class="tag ${x.type}">${x.type==='income'?'收入':'支出'}</span></td>
+    <td>${esc(x.category)}</td>
+    <td class="item">${esc(x.item)}${x.note?`<div class="note">${esc(x.note)}</div>`:''}</td>
+    <td>${esc(x.project)}${x.party?`<div class="note">${esc(x.party)}</div>`:''}</td>
+    <td>${esc(x.method)}${x.invoice?`<div class="note">${esc(x.invoice)}</div>`:''}</td>
+    <td>${pend?`<span class="tag pending">${x.type==='income'?'未收':'未付'}</span>`:'<span class="ok">✓</span>'}</td>
+    <td class="num ${x.type}">${x.type==='expense'?'-':''}$${fmt(x.amount)}</td>
+    <td class="ops">${pend?`<button data-act="settle" data-id="${x.id}">${x.type==='income'?'已收':'已付'}</button>`:''}<button data-act="edit" data-id="${x.id}">編輯</button><button data-act="copy" data-id="${x.id}">複製</button><button data-act="del" data-id="${x.id}">刪除</button></td>
+  </tr>`;
+}
+
+/* ===== 月報表 ===== */
+async function loadMonth(){
+  $('#monthPick').value = state.ym; $('#mBusy').textContent = '載入中…';
+  try { state.monthRows = await fetchRange(state.ym+'-01', state.ym+'-31'); renderMonth(); }
+  catch(e){ handleErr(e); } finally { $('#mBusy').textContent = ''; }
+}
+function renderMonth(){
+  const r = state.monthRows, inc = sum(r,'income'), exp = sum(r,'expense'), net = inc - exp;
+  const pIn = sum(r.filter(x=>x.status==='pending'),'income'), pEx = sum(r.filter(x=>x.status==='pending'),'expense');
+  const [y,m] = state.ym.split('-');
+  $('#mCards').innerHTML = cards([
+    {label:`${y} 年 ${+m} 月收入`, value:money(inc), cls:'in', sub:`${r.filter(x=>x.type==='income').length} 筆`},
+    {label:'本月支出', value:money(exp), cls:'ex', sub:`${r.filter(x=>x.type==='expense').length} 筆`},
+    {label:'本月淨額', value:money(net), cls: net<0?'neg':'', sub: inc?`淨利率 ${(net/inc*100).toFixed(1)}%`:''},
+    {label:'本月未收／未付', value:`${money(pIn)}`, cls:'warn', sub:`未付 ${money(pEx)}`}
+  ]);
+  $('#mCatIn').innerHTML = catBlock(r,'income');
+  $('#mCatEx').innerHTML = catBlock(r,'expense');
+
+  const sel = $('#fCat'), cur = sel.value;
+  const all = [...new Set([...cats.income, ...cats.expense, ...r.map(x=>x.category).filter(Boolean)])];
+  sel.innerHTML = '<option value="">全部分類</option>' + all.map(c=>`<option ${c===cur?'selected':''}>${esc(c)}</option>`).join('');
+  renderMonthTable();
+}
+function monthFiltered(){
+  const t=$('#fType').value, c=$('#fCat').value, s=$('#fStatus').value, q=$('#fSearch').value.trim().toLowerCase();
+  return state.monthRows.filter(x =>
+    (!t || x.type===t) && (!c || x.category===c) &&
+    (!s || (s==='pending' ? x.status==='pending' : x.status!=='pending')) &&
+    (!q || [x.item,x.project,x.party,x.invoice,x.note,x.category].join(' ').toLowerCase().includes(q)));
+}
+function renderMonthTable(){
+  const rows = monthFiltered();
+  $('#mBody').innerHTML = rows.length ? rows.map(x=>rowHtml(x)).join('') : '<tr><td colspan="9" class="empty">這個月還沒有紀錄，按右上角「＋ 收入」或「＋ 支出」開始記帳。</td></tr>';
+  const inc = sum(rows,'income'), exp = sum(rows,'expense');
+  $('#mFoot').innerHTML = rows.length ? `<tr><td colspan="7">篩選合計（收入 ${money(inc)}／支出 ${money(exp)}）</td><td class="num ${inc-exp<0?'neg-t':''}">${money(inc-exp)}</td><td></td></tr>` : '';
+}
+function shiftMonth(d){ let [y,m]=state.ym.split('-').map(Number); m+=d; if(m<1){m=12;y--} if(m>12){m=1;y++} state.ym=`${y}-${pad(m)}`; loadMonth(); }
+
+/* ===== 年報表 ===== */
+async function loadYear(){
+  const y = state.year; $('#yLabel').textContent = `${y} 年`; $('#yBusy').textContent = '載入中…';
+  try {
+    [state.yearRows, state.prevRows] = await Promise.all([
+      fetchRange(`${y}-01-01`,`${y}-12-31`), fetchRange(`${y-1}-01-01`,`${y-1}-12-31`)]);
+    renderYear();
+  } catch(e){ handleErr(e); } finally { $('#yBusy').textContent=''; }
+}
+function monthly(rows){
+  const inc = Array(12).fill(0), exp = Array(12).fill(0);
+  rows.forEach(r => { const i = +r.date.slice(5,7)-1; if (r.type==='income') inc[i]+= +r.amount||0; else exp[i]+= +r.amount||0; });
+  return {inc, exp};
+}
+function renderYear(){
+  const y = state.year, cur = monthly(state.yearRows), prev = monthly(state.prevRows);
+  const tI = cur.inc.reduce((a,b)=>a+b,0), tE = cur.exp.reduce((a,b)=>a+b,0), net = tI-tE;
+  const pI = prev.inc.reduce((a,b)=>a+b,0), pE = prev.exp.reduce((a,b)=>a+b,0);
+  const cmp = (a,b) => { const p = pct(a,b); return p===null ? `去年 ${money(b)}` : `去年 ${money(b)}，<span class="${p>=0?'up':'down'}">${p>=0?'▲':'▼'} ${Math.abs(p).toFixed(1)}%</span>`; };
+  $('#yCards').innerHTML = cards([
+    {label:`${y} 年收入`, value:money(tI), cls:'in', sub:cmp(tI,pI)},
+    {label:'全年支出', value:money(tE), cls:'ex', sub:cmp(tE,pE)},
+    {label:'全年淨額', value:money(net), cls:net<0?'neg':'', sub:cmp(net,pI-pE)},
+    {label:'淨利率', value: tI ? (net/tI*100).toFixed(1)+'%' : '—', sub:`月平均收入 ${money(tI/12)}`}
+  ]);
+  $('#yChart').innerHTML = chartSvg(cur.inc, cur.exp);
+  let acc = 0, html = '';
+  for (let i=0;i<12;i++){
+    const n = cur.inc[i]-cur.exp[i], pn = prev.inc[i]-prev.exp[i]; acc += n;
+    html += `<tr class="click" data-month="${y}-${pad(i+1)}"><td>${i+1} 月</td><td class="num">${money(cur.inc[i])}</td><td class="num">${money(cur.exp[i])}</td><td class="num ${n<0?'neg-t':''}">${money(n)}</td><td class="num ${acc<0?'neg-t':''}">${money(acc)}</td><td class="num" style="color:var(--sub)">${money(pn)}</td></tr>`;
+  }
+  $('#yBody').innerHTML = html;
+  $('#yFoot').innerHTML = `<tr><td>合計</td><td class="num">${money(tI)}</td><td class="num">${money(tE)}</td><td class="num ${net<0?'neg-t':''}">${money(net)}</td><td class="num"></td><td class="num" style="color:var(--sub)">${money(pI-pE)}</td></tr>`;
+  $('#yCatIn').innerHTML = catBlock(state.yearRows,'income');
+  $('#yCatEx').innerHTML = catBlock(state.yearRows,'expense');
+}
+function niceMax(v){ const p = Math.pow(10, Math.floor(Math.log10(v))), n = v/p; return (n<=1?1:n<=2?2:n<=5?5:10)*p; }
+function axisLabel(v){ return v>=10000 ? (v/10000).toLocaleString('zh-TW',{maximumFractionDigits:1})+'萬' : fmt(v); }
+function chartSvg(inc, exp){
+  const W=760,H=280,L=56,R=12,T=16,B=32, cw=(W-L-R)/12, bw=Math.min(20,cw*0.34);
+  const max = niceMax(Math.max(1,...inc,...exp)), y = v => T+(H-T-B)*(1-v/max);
+  let s = `<svg viewBox="0 0 ${W} ${H}" class="chart" role="img" aria-label="每月收支長條圖">`;
+  for (let i=0;i<=4;i++){ const v=max*i/4; s+=`<line x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}" class="grid"/><text x="${L-6}" y="${y(v)+4}" class="ax" text-anchor="end">${axisLabel(v)}</text>`; }
+  inc.forEach((v,i) => {
+    const cx = L+cw*i+cw/2;
+    s += `<rect x="${cx-bw-1}" y="${y(v)}" width="${bw}" height="${y(0)-y(v)}" rx="2" class="b-in"><title>${i+1}月收入 $${fmt(v)}</title></rect>`;
+    s += `<rect x="${cx+1}" y="${y(exp[i])}" width="${bw}" height="${y(0)-y(exp[i])}" rx="2" class="b-ex"><title>${i+1}月支出 $${fmt(exp[i])}</title></rect>`;
+    s += `<text x="${cx}" y="${H-10}" class="ax" text-anchor="middle">${i+1}月</text>`;
+  });
+  return s + '</svg>';
+}
+
+/* ===== 未收付款 ===== */
+async function loadPending(){
+  $('#pBusy').textContent='載入中…';
+  try {
+    const snap = await db.collection(COL).where('status','==','pending').get();
+    state.pendingRows = remember(snap.docs.map(d=>({id:d.id,...d.data()}))).sort((a,b)=>a.date.localeCompare(b.date));
+    const r = state.pendingRows;
+    $('#pCards').innerHTML = cards([
+      {label:'應收未收', value:money(sum(r,'income')), cls:'in', sub:`${r.filter(x=>x.type==='income').length} 筆`},
+      {label:'應付未付', value:money(sum(r,'expense')), cls:'ex', sub:`${r.filter(x=>x.type==='expense').length} 筆`}
+    ]);
+    $('#pBody').innerHTML = r.length ? r.map(x=>rowHtml(x,true)).join('') : '<tr><td colspan="9" class="empty">目前沒有未收付的款項。</td></tr>';
+  } catch(e){ handleErr(e); } finally { $('#pBusy').textContent=''; }
+}
+
+/* ===== 分類設定 ===== */
+async function loadCats(){
+  try { const d = await db.collection(SET).doc('categories').get();
+    if (d.exists) cats = { ...DEFAULTS, ...d.data() }; } catch(e){ console.warn(e); }
+}
+function renderSettings(){
+  $('#catIn').value = cats.income.join('\n'); $('#catEx').value = cats.expense.join('\n'); $('#catMethod').value = cats.methods.join('\n');
+}
+$('#saveCats').onclick = async () => {
+  const lines = id => [...new Set($(id).value.split('\n').map(s=>s.trim()).filter(Boolean))];
+  const next = { income: lines('#catIn'), expense: lines('#catEx'), methods: lines('#catMethod') };
+  if (!next.income.length || !next.expense.length) return alert('收入與支出分類至少各需一項');
+  try { await db.collection(SET).doc('categories').set({ ...next, updatedAt: TS() }); cats = next; toast('分類已儲存'); }
+  catch(e){ handleErr(e); }
+};
+
+/* ===== 新增／編輯 ===== */
+const F = n => $('#entryForm').elements[n];
+function fillSelect(sel, list, val){
+  const opts = val && !list.includes(val) ? [...list, val] : list;
+  sel.innerHTML = opts.map(o=>`<option ${o===val?'selected':''}>${esc(o)}</option>`).join('');
+}
+function fillCats(type, val){ fillSelect(F('category'), cats[type], val); }
+function fillDatalists(){
+  const rows = Object.values(state.byId);
+  $('#projList').innerHTML = [...new Set(rows.map(r=>r.project).filter(Boolean))].map(v=>`<option value="${esc(v)}">`).join('');
+  $('#partyList').innerHTML = [...new Set(rows.map(r=>r.party).filter(Boolean))].map(v=>`<option value="${esc(v)}">`).join('');
+}
+function defaultDate(){ return today().startsWith(state.ym) || state.view!=='month' ? today() : state.ym+'-01'; }
+function openEntry(type, data, isCopy){
+  const f = $('#entryForm'); f.reset();
+  state.editId = data && !isCopy ? data.id : null;
+  const t = data?.type || type;
+  F('type').value = t; fillCats(t, data?.category);
+  fillSelect(F('payMethod'), cats.methods, data?.method);
+  F('date').value = data && !isCopy ? data.date : defaultDate();
+  F('amount').value = data ? fmt(data.amount) : '';
+  F('status').value = data?.status === 'pending' ? 'pending' : 'done';
+  ['item','project','party','invoice','note'].forEach(k => F(k).value = data?.[k] || '');
+  $('#dlgTitle').textContent = state.editId ? '編輯紀錄' : isCopy ? '複製為新紀錄' : (t==='income'?'新增收入':'新增支出');
+  fillDatalists();
+  $('#entryDlg').showModal();
+}
+document.querySelectorAll('#entryForm input[name=type]').forEach(r => r.onchange = () => fillCats(r.value));
+$('#dlgCancel').onclick = () => $('#entryDlg').close();
+$('#entryForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const amount = Number(String(F('amount').value).replace(/[,\s$]/g,''));
+  if (!(amount > 0)) return alert('請輸入正確金額');
+  const d = {
+    type: F('type').value, date: F('date').value, amount,
+    category: F('category').value, status: F('status').value, method: F('payMethod').value,
+    item: F('item').value.trim(), project: F('project').value.trim(), party: F('party').value.trim(),
+    invoice: F('invoice').value.trim(), note: F('note').value.trim(),
+    updatedAt: TS(), updatedBy: auth.currentUser.email
+  };
+  try {
+    if (state.editId) await db.collection(COL).doc(state.editId).update(d);
+    else await db.collection(COL).add({ ...d, createdAt: TS(), createdBy: auth.currentUser.email });
+    $('#entryDlg').close(); toast('已儲存');
+    if (state.view==='month' && !d.date.startsWith(state.ym)) { state.ym = d.date.slice(0,7); }
+    refresh();
+  } catch(err){ handleErr(err); }
+});
+document.querySelectorAll('[data-new]').forEach(b => b.onclick = () => openEntry(b.dataset.new));
+
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-act]');
+  if (b){
+    const x = state.byId[b.dataset.id]; if (!x) return;
+    const act = b.dataset.act;
+    if (act==='edit') openEntry(null, x);
+    if (act==='copy') openEntry(null, x, true);
+    if (act==='settle'){
+      try { await db.collection(COL).doc(x.id).update({ status:'done', settledAt:TS(), updatedAt:TS(), updatedBy:auth.currentUser.email }); toast(x.type==='income'?'已標記收款':'已標記付款'); refresh(); } catch(err){ handleErr(err); }
+    }
+    if (act==='del' && confirm(`確定刪除這筆紀錄？\n${x.date}　${x.item}　$${fmt(x.amount)}\n刪除後無法復原。`)){
+      try { await db.collection(COL).doc(x.id).delete(); delete state.byId[x.id]; toast('已刪除'); refresh(); } catch(err){ handleErr(err); }
+    }
+    return;
+  }
+  const tr = e.target.closest('tr[data-month]');
+  if (tr){ state.ym = tr.dataset.month; switchView('month'); }
+});
+
+/* ===== CSV 匯出（Excel 可直接開啟） ===== */
+function exportCsv(rows, name){
+  const head = ['日期','類型','分類','項目','專案','客戶/廠商','收付方式','發票/單據','狀態','金額','備註'];
+  const body = rows.map(x => [x.date, x.type==='income'?'收入':'支出', x.category, x.item, x.project, x.party, x.method, x.invoice,
+    x.status==='pending'?'未收付':'已收付', x.type==='expense' ? -x.amount : x.amount, x.note]);
+  const csv = [head, ...body].map(r => r.map(v => { v = String(v ?? ''); return /[",\n]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v; }).join(',')).join('\r\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob(['\ufeff'+csv], {type:'text/csv;charset=utf-8'}));
+  a.download = name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+}
+$('#mCsv').onclick = () => exportCsv(monthFiltered(), `營收支出_${state.ym}.csv`);
+$('#yCsv').onclick = () => exportCsv(state.yearRows, `營收支出_${state.year}年.csv`);
+
+/* ===== 導覽 ===== */
+function switchView(v){
+  state.view = v;
+  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.view===v));
+  ['month','year','pending','settings'].forEach(k => $('#v-'+k).hidden = k!==v);
+  refresh();
+}
+function refresh(){
+  if (state.view==='month') loadMonth();
+  else if (state.view==='year') loadYear();
+  else if (state.view==='pending') loadPending();
+  else renderSettings();
+}
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => switchView(b.dataset.view));
+$('#mPrev').onclick = () => shiftMonth(-1);
+$('#mNext').onclick = () => shiftMonth(1);
+$('#monthPick').onchange = e => { if (e.target.value){ state.ym = e.target.value; loadMonth(); } };
+$('#yPrev').onclick = () => { state.year--; loadYear(); };
+$('#yNext').onclick = () => { state.year++; loadYear(); };
+['#fType','#fCat','#fStatus'].forEach(id => $(id).onchange = renderMonthTable);
+$('#fSearch').oninput = renderMonthTable;
+
+/* ===== 登入 ===== */
+$('#loginForm').addEventListener('submit', async e => {
+  e.preventDefault(); $('#loginErr').textContent = '';
+  try { await auth.signInWithEmailAndPassword($('#email').value.trim(), $('#pw').value); }
+  catch(err){ $('#loginErr').textContent = '登入失敗：帳號或密碼錯誤'; }
+});
+$('#logout').onclick = () => auth.signOut();
+auth.onAuthStateChanged(async u => {
+  $('#login').hidden = !!u; $('#app').hidden = !u;
+  if (u){ $('#userEmail').textContent = u.email; await loadCats(); switchView(state.view); }
+});
+</script>
+</body>
+</html>
