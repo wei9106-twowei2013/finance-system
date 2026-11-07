@@ -115,6 +115,17 @@ dialog::backdrop{background:rgba(20,25,35,.45)}
 
 .settings textarea{width:100%;min-height:260px;line-height:1.7}
 .hint{font-size:13px;color:var(--sub);margin:0 0 8px}
+.imp-row{border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px}
+.imp-row.off{opacity:.45}
+.imp-head{display:flex;gap:8px;align-items:center;margin-bottom:8px;font-size:13px}
+.imp-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.imp-grid label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--sub)}
+.imp-grid .w2{grid-column:span 2}.imp-grid .w4{grid-column:1/-1}
+.imp-info{font-size:12px;color:var(--sub);margin-top:6px}.imp-info .w{color:var(--warn)}
+@media(max-width:620px){.imp-grid{grid-template-columns:1fr 1fr}}
+#importDlg{width:min(900px,calc(100% - 32px))}
+.dlg-scroll{max-height:65vh;overflow:auto;padding:16px 20px}
+.taxline{grid-column:1/-1;font-size:13px;color:var(--sub);background:#f7f8fa;border-radius:8px;padding:8px 10px}
 #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#1f2328;color:#fff;padding:10px 18px;border-radius:8px;font-size:14px;opacity:0;transition:.2s;pointer-events:none}
 #toast.show{opacity:1}
 </style>
@@ -157,6 +168,8 @@ dialog::backdrop{background:rgba(20,25,35,.45)}
         <span class="spacer"></span>
         <button class="in" data-new="income">＋ 收入</button>
         <button class="ex" data-new="expense">＋ 支出</button>
+        <button id="impBtn">📄 匯入請款單</button>
+        <input type="file" id="impFile" accept="application/pdf,.pdf" multiple hidden>
         <button id="mCsv">匯出 CSV</button>
       </div>
       <div class="cards" id="mCards"></div>
@@ -243,12 +256,16 @@ dialog::backdrop{background:rgba(20,25,35,.45)}
         <label><input type="radio" name="type" value="expense">支出</label>
       </div>
       <label>日期<input type="date" name="date" required></label>
-      <label>金額（元，含稅）<input name="amount" inputmode="numeric" required placeholder="例：50000"></label>
+      <label>發票類型<select name="invType"></select></label>
+      <label>含稅金額（元）<input name="amount" inputmode="numeric" required placeholder="例：52500"></label>
+      <label>未稅金額（元）<input name="amountExcl" inputmode="numeric" placeholder="自動計算"></label>
+      <div class="taxline" id="taxLine"></div>
       <label>分類<select name="category"></select></label>
       <label>狀態<select name="status"><option value="done">已收／已付</option><option value="pending">未收／未付</option></select></label>
       <label class="full">項目說明<input name="item" required placeholder="例：《非關公民》展覽輸出第二期款"></label>
       <label>專案名稱<input name="project" list="projList" placeholder="可留空"></label>
       <label>客戶／廠商<input name="party" list="partyList" placeholder="可留空"></label>
+      <label>聯絡人／收件人<input name="contact" placeholder="可留空"></label>
       <label>收付方式<select name="payMethod"></select></label>
       <label>發票／單據號碼<input name="invoice" placeholder="可留空"></label>
       <label class="full">備註<textarea name="note" rows="2"></textarea></label>
@@ -260,8 +277,17 @@ dialog::backdrop{background:rgba(20,25,35,.45)}
   </form>
   <datalist id="projList"></datalist><datalist id="partyList"></datalist>
 </dialog>
+<dialog id="importDlg">
+  <div class="dlg-h">匯入請款單 <span class="hint" style="font-weight:400">— 請核對辨識結果，可直接修改</span></div>
+  <div class="dlg-scroll" id="impList"></div>
+  <div class="dlg-f">
+    <button type="button" id="impCancel">取消</button>
+    <button type="button" class="primary" id="impSave">匯入勾選項目</button>
+  </div>
+</dialog>
 <div id="toast"></div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
@@ -299,6 +325,8 @@ const money = n => (n < 0 ? '-$' : '$') + fmt(Math.abs(n));
 const pad = n => String(n).padStart(2, '0');
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; };
 const sum = (rows, type) => rows.filter(r => r.type === type).reduce((a, r) => a + (+r.amount || 0), 0);
+const exclOf = r => r.amountExcl != null && r.amountExcl !== '' ? +r.amountExcl : +r.amount || 0;
+const sumExcl = (rows, type) => rows.filter(r => r.type === type).reduce((a, r) => a + exclOf(r), 0);
 const pct = (a, b) => b ? ((a - b) / Math.abs(b) * 100) : null;
 function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('show'),1800); }
 function handleErr(e){
@@ -309,7 +337,7 @@ function handleErr(e){
 }
 
 const state = { view:'month', ym: today().slice(0,7), year: +today().slice(0,4),
-  monthRows:[], yearRows:[], prevRows:[], pendingRows:[], byId:{}, editId:null };
+  monthRows:[], yearRows:[], prevRows:[], pendingRows:[], byId:{}, editId:null, imports:[], exclManual:false };
 
 function remember(rows){ rows.forEach(r => state.byId[r.id] = r); return rows; }
 async function fetchRange(from, to){
@@ -336,10 +364,10 @@ function rowHtml(x, showYear){
     <td><span class="tag ${x.type}">${x.type==='income'?'收入':'支出'}</span></td>
     <td>${esc(x.category)}</td>
     <td class="item">${esc(x.item)}${x.note?`<div class="note">${esc(x.note)}</div>`:''}</td>
-    <td>${esc(x.project)}${x.party?`<div class="note">${esc(x.party)}</div>`:''}</td>
+    <td>${esc(x.project)}${x.party?`<div class="note">${esc(x.party)}${x.contact?'・'+esc(x.contact):''}</div>`:''}</td>
     <td>${esc(x.method)}${x.invoice?`<div class="note">${esc(x.invoice)}</div>`:''}</td>
     <td>${pend?`<span class="tag pending">${x.type==='income'?'未收':'未付'}</span>`:'<span class="ok">✓</span>'}</td>
-    <td class="num ${x.type}">${x.type==='expense'?'-':''}$${fmt(x.amount)}</td>
+    <td class="num ${x.type}">${x.type==='expense'?'-':''}$${fmt(x.amount)}${exclOf(x)!==+x.amount?`<div class="note">未稅 $${fmt(exclOf(x))}</div>`:''}${x.invType?`<div class="note">${esc(x.invType)}</div>`:''}</td>
     <td class="ops">${pend?`<button data-act="settle" data-id="${x.id}">${x.type==='income'?'已收':'已付'}</button>`:''}<button data-act="edit" data-id="${x.id}">編輯</button><button data-act="copy" data-id="${x.id}">複製</button><button data-act="del" data-id="${x.id}">刪除</button></td>
   </tr>`;
 }
@@ -355,8 +383,8 @@ function renderMonth(){
   const pIn = sum(r.filter(x=>x.status==='pending'),'income'), pEx = sum(r.filter(x=>x.status==='pending'),'expense');
   const [y,m] = state.ym.split('-');
   $('#mCards').innerHTML = cards([
-    {label:`${y} 年 ${+m} 月收入`, value:money(inc), cls:'in', sub:`${r.filter(x=>x.type==='income').length} 筆`},
-    {label:'本月支出', value:money(exp), cls:'ex', sub:`${r.filter(x=>x.type==='expense').length} 筆`},
+    {label:`${y} 年 ${+m} 月收入（含稅）`, value:money(inc), cls:'in', sub:`${r.filter(x=>x.type==='income').length} 筆・未稅 ${money(sumExcl(r,'income'))}・稅額 ${money(inc-sumExcl(r,'income'))}`},
+    {label:'本月支出（含稅）', value:money(exp), cls:'ex', sub:`${r.filter(x=>x.type==='expense').length} 筆・未稅 ${money(sumExcl(r,'expense'))}・稅額 ${money(exp-sumExcl(r,'expense'))}`},
     {label:'本月淨額', value:money(net), cls: net<0?'neg':'', sub: inc?`淨利率 ${(net/inc*100).toFixed(1)}%`:''},
     {label:'本月未收／未付', value:`${money(pIn)}`, cls:'warn', sub:`未付 ${money(pEx)}`}
   ]);
@@ -373,7 +401,7 @@ function monthFiltered(){
   return state.monthRows.filter(x =>
     (!t || x.type===t) && (!c || x.category===c) &&
     (!s || (s==='pending' ? x.status==='pending' : x.status!=='pending')) &&
-    (!q || [x.item,x.project,x.party,x.invoice,x.note,x.category].join(' ').toLowerCase().includes(q)));
+    (!q || [x.item,x.project,x.party,x.contact,x.invoice,x.note,x.category].join(' ').toLowerCase().includes(q)));
 }
 function renderMonthTable(){
   const rows = monthFiltered();
@@ -406,7 +434,8 @@ function renderYear(){
     {label:`${y} 年收入`, value:money(tI), cls:'in', sub:cmp(tI,pI)},
     {label:'全年支出', value:money(tE), cls:'ex', sub:cmp(tE,pE)},
     {label:'全年淨額', value:money(net), cls:net<0?'neg':'', sub:cmp(net,pI-pE)},
-    {label:'淨利率', value: tI ? (net/tI*100).toFixed(1)+'%' : '—', sub:`月平均收入 ${money(tI/12)}`}
+    {label:'淨利率', value: tI ? (net/tI*100).toFixed(1)+'%' : '—', sub:`月平均收入 ${money(tI/12)}`},
+    {label:'全年未稅收入', value:money(sumExcl(state.yearRows,'income')), sub:`銷項稅額 ${money(tI-sumExcl(state.yearRows,'income'))}・進項稅額 ${money(tE-sumExcl(state.yearRows,'expense'))}`}
   ]);
   $('#yChart').innerHTML = chartSvg(cur.inc, cur.exp);
   let acc = 0, html = '';
@@ -485,16 +514,28 @@ function openEntry(type, data, isCopy){
   const t = data?.type || type;
   F('type').value = t; fillCats(t, data?.category);
   fillSelect(F('payMethod'), cats.methods, data?.method);
+  fillSelect(F('invType'), INV_TYPES, data?.invType || '三聯式');
   F('date').value = data && !isCopy ? data.date : defaultDate();
   F('amount').value = data ? fmt(data.amount) : '';
+  state.exclManual = !!(data && data.amountExcl != null);
+  F('amountExcl').value = data ? fmt(exclOf(data)) : '';
   F('status').value = data?.status === 'pending' ? 'pending' : 'done';
-  ['item','project','party','invoice','note'].forEach(k => F(k).value = data?.[k] || '');
+  ['item','project','party','contact','invoice','note'].forEach(k => F(k).value = data?.[k] || '');
   $('#dlgTitle').textContent = state.editId ? '編輯紀錄' : isCopy ? '複製為新紀錄' : (t==='income'?'新增收入':'新增支出');
-  fillDatalists();
+  fillDatalists(); syncTax();
   $('#entryDlg').showModal();
 }
 document.querySelectorAll('#entryForm input[name=type]').forEach(r => r.onchange = () => fillCats(r.value));
 $('#dlgCancel').onclick = () => $('#entryDlg').close();
+function syncTax(){
+  const amt = NUM(F('amount').value), t = F('invType').value;
+  if (!state.exclManual) F('amountExcl').value = amt ? fmt(exclFrom(amt, t)) : '';
+  const ex = NUM(F('amountExcl').value);
+  $('#taxLine').innerHTML = amt ? `未稅 ${money(ex)} ＋ 稅額 ${money(amt-ex)} ＝ 含稅 ${money(amt)}${ex>amt?' <span style="color:var(--ex)">（未稅大於含稅，請確認）</span>':''}` : (isTaxed(t)?'輸入含稅金額後自動算出未稅（÷1.05）；也可直接修改未稅金額':'此類型不計營業稅，未稅＝含稅');
+}
+F('amount').addEventListener('input', syncTax);
+F('invType').addEventListener('change', () => { state.exclManual = false; syncTax(); });
+F('amountExcl').addEventListener('input', () => { state.exclManual = F('amountExcl').value.trim() !== ''; syncTax(); });
 $('#entryForm').addEventListener('submit', async e => {
   e.preventDefault();
   const amount = Number(String(F('amount').value).replace(/[,\s$]/g,''));
@@ -502,6 +543,8 @@ $('#entryForm').addEventListener('submit', async e => {
   const d = {
     type: F('type').value, date: F('date').value, amount,
     category: F('category').value, status: F('status').value, method: F('payMethod').value,
+    invType: F('invType').value, amountExcl: NUM(F('amountExcl').value) || exclFrom(amount, F('invType').value),
+    contact: F('contact').value.trim(),
     item: F('item').value.trim(), project: F('project').value.trim(), party: F('party').value.trim(),
     invoice: F('invoice').value.trim(), note: F('note').value.trim(),
     updatedAt: TS(), updatedBy: auth.currentUser.email
@@ -537,9 +580,10 @@ document.addEventListener('click', async e => {
 
 /* ===== CSV 匯出（Excel 可直接開啟） ===== */
 function exportCsv(rows, name){
-  const head = ['日期','類型','分類','項目','專案','客戶/廠商','收付方式','發票/單據','狀態','金額','備註'];
-  const body = rows.map(x => [x.date, x.type==='income'?'收入':'支出', x.category, x.item, x.project, x.party, x.method, x.invoice,
-    x.status==='pending'?'未收付':'已收付', x.type==='expense' ? -x.amount : x.amount, x.note]);
+  const head = ['日期','類型','分類','項目','專案','客戶/廠商','聯絡人','收付方式','發票類型','發票/單據','狀態','未稅金額','稅額','含稅金額','備註'];
+  const body = rows.map(x => { const sg = x.type==='expense' ? -1 : 1, ex = exclOf(x);
+    return [x.date, x.type==='income'?'收入':'支出', x.category, x.item, x.project, x.party, x.contact, x.method, x.invType, x.invoice,
+    x.status==='pending'?'未收付':'已收付', sg*ex, sg*(x.amount-ex), sg*x.amount, x.note]; });
   const csv = [head, ...body].map(r => r.map(v => { v = String(v ?? ''); return /[",\n]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v; }).join(',')).join('\r\n');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob(['\ufeff'+csv], {type:'text/csv;charset=utf-8'}));
@@ -547,6 +591,174 @@ function exportCsv(rows, name){
 }
 $('#mCsv').onclick = () => exportCsv(monthFiltered(), `營收支出_${state.ym}.csv`);
 $('#yCsv').onclick = () => exportCsv(state.yearRows, `營收支出_${state.year}年.csv`);
+
+/* ===== 請款單解析 ===== */
+const INV_TYPES = ['三聯式','二聯式','電子發票','收據／免稅','無'];
+const isTaxed = t => !['收據／免稅','無'].includes(t);
+const exclFrom = (amt, t) => isTaxed(t) ? Math.round(amt / 1.05) : amt;
+const NUM = s => Number(String(s ?? '').replace(/[^\d.]/g, '')) || 0;
+function rocToISO(s){
+  const m = String(s).match(/(\d{2,4})\s*[\/.\-年]\s*(\d{1,2})\s*[\/.\-月]\s*(\d{1,2})/);
+  if (!m) return '';
+  let y = +m[1]; if (y < 1911) y += 1911;
+  return `${y}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`;
+}
+function linesFromItems(items){
+  const rows = [];
+  items.filter(i => i.str && i.str.trim()).forEach(i => {
+    const x = i.transform[4], y = i.transform[5];
+    let r = rows.find(r => Math.abs(r.y - y) < 3);
+    if (!r){ r = { y, parts: [] }; rows.push(r); }
+    r.parts.push({ x, s: i.str });
+  });
+  return rows.sort((a,b) => b.y - a.y).map(r => r.parts.sort((a,b) => a.x - b.x).map(p => p.s).join(' ')).join('\n');
+}
+function guessCat(s, list){
+  const rules = [[/印刷|名片|輸出|海報|DM|大圖|貼紙/,'印刷輸出'],[/展示|展覽|展廳|展場|布展|佈展|策展/,'展覽製作'],
+    [/工程|施工|裝修|木作|水電/,'工程施作'],[/設計|規劃/,'設計規劃'],[/研究|調查/,'策展研究']];
+  for (const [re, c] of rules) if (re.test(s) && list.includes(c)) return c;
+  return list.includes('其他收入') ? '其他收入' : list[0];
+}
+function parseInvoice(annotRaw, textRaw, fileName, catList){
+  const a = String(annotRaw || '').normalize('NFKC').replace(/\r/g, '');
+  const t = String(textRaw || '').normalize('NFKC').replace(/\r/g, '');
+  const r = { file: fileName, invType: '', date: '', party: '', contact: '', item: '', project: '', amount: 0, amountExcl: 0, warn: [] };
+
+  // 發票類型
+  const tm = (a + '\n' + t).match(/(二聯|三聯|電子)式?發票/);
+  r.invType = tm ? (tm[1] === '電子' ? '電子發票' : tm[1] + '式') : '三聯式';
+
+  // 紅字註解：關鍵字：內容
+  const KEYS = ['日期','抬頭','項目','含稅金額','未稅金額','稅額','請款金額','金額','收件人','統一編號','統編'];
+  const hits = [...a.matchAll(new RegExp('(' + KEYS.join('|') + ')\\s*[:：]', 'g'))];
+  const kv = {};
+  hits.forEach((h, i) => {
+    const end = i + 1 < hits.length ? hits[i + 1].index : a.length;
+    let v = a.slice(h.index + h[0].length, end).trim();
+    if (h[1] !== '項目') v = v.split('\n')[0].trim();
+    if (!(h[1] in kv)) kv[h[1]] = v;
+  });
+  r.date = rocToISO(kv['日期'] || '');
+  r.party = kv['抬頭'] || '';
+  r.item = (kv['項目'] || '').split('\n').map(s => s.trim()).filter(Boolean).join('');
+  r.contact = kv['收件人'] || '';
+  if (!r.contact){
+    const line = a.split('\n').map(s => s.trim()).find(s => /收$/.test(s) && !/[:：]/.test(s));
+    if (line) r.contact = line.replace(/收$/, '').trim();
+  }
+  r.amount = NUM(kv['含稅金額'] || kv['請款金額'] || kv['金額']);
+  r.amountExcl = NUM(kv['未稅金額']);
+
+  // 報價單本文（文字層）
+  if (!r.party){ const m = t.match(/Customer\s+(.+?)(?:\s+Contract\b|\s*$)/m); if (m) r.party = m[1].trim(); }
+  const pm = t.match(/Project\s+(.+?)(?:\s+Add\b|\s*$)/m);
+  if (pm) r.project = pm[1].trim();
+  if (!r.item) r.item = r.project;
+  if (!r.contact){ const m = t.match(/Attn\.?\s+(.+?)(?:\s+Phone\b|\s*$)/m); if (m) r.contact = m[1].trim(); }
+  if (!r.date){ const m = t.match(/日期[：:]\s*(\d{2,4}[\/.\-]\d{1,2}[\/.\-]\d{1,2})/); if (m){ r.date = rocToISO(m[1]); r.warn.push('發票日期取自報價日期，請確認'); } }
+
+  // 從本文找「未稅 × 1.05 = 含稅」的金額組合
+  const nums = [...new Set([...t.matchAll(/\$?\s*(\d{1,3}(?:,\d{3})+|\d{3,})/g)].map(m => NUM(m[1])).filter(n => n > 0))];
+  const pairs = [];
+  nums.forEach(x => nums.forEach(y => { if (y !== x && y === Math.round(x * 1.05)) pairs.push([x, y]); }));
+  if (r.amount){
+    const p = pairs.find(p => p[1] === r.amount);
+    if (!r.amountExcl && p) r.amountExcl = p[0];
+  } else if (pairs.length){
+    pairs.sort((p, q) => q[1] - p[1]);
+    [r.amountExcl, r.amount] = pairs[0];
+  }
+  if (r.amount && !r.amountExcl) r.amountExcl = exclFrom(r.amount, r.invType);
+  if (r.amount && r.amountExcl && isTaxed(r.invType) && Math.abs(Math.round(r.amountExcl * 1.05) - r.amount) > 1)
+    r.warn.push('未稅 × 1.05 與含稅金額不符，請確認');
+
+  // 專案名稱：去掉「第一期款」等期別
+  if (!r.project) r.project = r.item.replace(/\s*(第[一二三四五六七八九十\d]+期款?|頭期款|尾款|期末款)\s*$/, '').trim();
+  r.category = guessCat(r.item + r.project, catList || ['其他收入']);
+  if (!r.amount) r.warn.push('找不到金額，請手動輸入');
+  if (!r.date) r.warn.push('找不到發票日期，請手動輸入');
+  if (!r.party) r.warn.push('找不到抬頭（客戶）');
+  return r;
+}
+
+/* ===== 匯入請款單 PDF ===== */
+if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+async function readPdf(file){
+  const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+  let annot = '', text = '';
+  for (let p = 1; p <= pdf.numPages; p++){
+    const page = await pdf.getPage(p);
+    (await page.getAnnotations()).forEach(a => { const s = a.contentsObj?.str || a.contents || ''; if (s) annot += s + '\n'; });
+    text += linesFromItems((await page.getTextContent()).items) + '\n';
+  }
+  return { annot, text };
+}
+$('#impBtn').onclick = () => { if (!window.pdfjsLib) return alert('PDF 讀取元件載入失敗，請重新整理頁面'); $('#impFile').value = ''; $('#impFile').click(); };
+$('#impFile').onchange = async e => {
+  const files = [...e.target.files]; if (!files.length) return;
+  $('#mBusy').textContent = '讀取請款單…';
+  const out = [];
+  for (const f of files){
+    try { const { annot, text } = await readPdf(f); out.push(parseInvoice(annot, text, f.name, cats.income)); }
+    catch(err){ console.error(err); out.push({ file:f.name, invType:'三聯式', date:'', party:'', contact:'', item:'', project:'', amount:0, amountExcl:0, category:cats.income[0], warn:['無法讀取此 PDF'] }); }
+  }
+  // 重複檢查：同日期、同含稅金額
+  for (const r of out){
+    if (!r.date || !r.amount) continue;
+    try { const snap = await db.collection(COL).where('date','==',r.date).get();
+      if (snap.docs.some(d => d.data().type==='income' && +d.data().amount === r.amount)) { r.dup = true; r.warn.push('系統中已有同日期、同金額的收入，可能重複'); }
+    } catch(err){ console.warn(err); }
+  }
+  $('#mBusy').textContent = '';
+  state.imports = out; renderImports(); $('#importDlg').showModal();
+};
+function impTaxText(r){ return `稅額 ${money(r.amount - r.amountExcl)}`; }
+function renderImports(){
+  const opt = (list, v) => (v && !list.includes(v) ? [...list, v] : list).map(o => `<option ${o===v?'selected':''}>${esc(o)}</option>`).join('');
+  $('#impList').innerHTML = state.imports.map((r, i) => `<div class="imp-row${r.dup?' off':''}" data-i="${i}">
+    <div class="imp-head"><input type="checkbox" class="imp-on" ${r.dup?'':'checked'}><b>${esc(r.file)}</b></div>
+    <div class="imp-grid">
+      <label>發票日期<input type="date" data-k="date" value="${esc(r.date)}"></label>
+      <label>發票類型<select data-k="invType">${opt(INV_TYPES, r.invType)}</select></label>
+      <label>分類<select data-k="category">${opt(cats.income, r.category)}</select></label>
+      <label>狀態<select data-k="status"><option value="pending" selected>未收款</option><option value="done">已收款</option></select></label>
+      <label class="w2">抬頭（客戶）<input data-k="party" value="${esc(r.party)}"></label>
+      <label class="w2">收件人／聯絡人<input data-k="contact" value="${esc(r.contact)}"></label>
+      <label class="w4">項目<input data-k="item" value="${esc(r.item)}"></label>
+      <label class="w2">專案名稱<input data-k="project" value="${esc(r.project)}"></label>
+      <label>未稅金額<input data-k="amountExcl" inputmode="numeric" value="${r.amountExcl?fmt(r.amountExcl):''}"></label>
+      <label>含稅金額<input data-k="amount" inputmode="numeric" value="${r.amount?fmt(r.amount):''}"></label>
+    </div>
+    <div class="imp-info"><span class="tax">${impTaxText(r)}</span>${r.warn.map(w => `　<span class="w">⚠ ${esc(w)}</span>`).join('')}</div>
+  </div>`).join('');
+}
+$('#impList').addEventListener('input', e => {
+  const row = e.target.closest('.imp-row'); if (!row) return;
+  if (e.target.classList.contains('imp-on')){ row.classList.toggle('off', !e.target.checked); return; }
+  const r = state.imports[row.dataset.i], k = e.target.dataset.k; if (!k) return;
+  if (k === 'amount' || k === 'amountExcl') r[k] = NUM(e.target.value); else r[k] = e.target.value;
+  if (k === 'amount' || k === 'invType'){
+    r.amountExcl = exclFrom(r.amount, r.invType);
+    row.querySelector('[data-k=amountExcl]').value = r.amountExcl ? fmt(r.amountExcl) : '';
+  }
+  row.querySelector('.tax').textContent = impTaxText(r);
+});
+$('#impCancel').onclick = () => $('#importDlg').close();
+$('#impSave').onclick = async () => {
+  const rows = [...document.querySelectorAll('#impList .imp-row')].filter(el => el.querySelector('.imp-on').checked).map(el => state.imports[el.dataset.i]);
+  if (!rows.length) return alert('沒有勾選要匯入的請款單');
+  const bad = rows.find(r => !(r.amount > 0) || !/^\d{4}-\d{2}-\d{2}$/.test(r.date));
+  if (bad) return alert(`「${bad.file}」的日期或金額不完整，請補上後再匯入`);
+  const batch = db.batch(), who = auth.currentUser.email;
+  rows.forEach(r => batch.set(db.collection(COL).doc(), {
+    type:'income', date:r.date, amount:r.amount, amountExcl:r.amountExcl || exclFrom(r.amount, r.invType), invType:r.invType,
+    category:r.category, status:r.status || 'pending', method:'匯款', item:(r.item || r.project).trim(), project:r.project.trim(),
+    party:r.party.trim(), contact:r.contact.trim(), invoice:'', note:`匯入自請款單：${r.file}`, source:'invoice-import',
+    createdAt:TS(), createdBy:who, updatedAt:TS(), updatedBy:who
+  }));
+  try { await batch.commit(); $('#importDlg').close(); toast(`已匯入 ${rows.length} 筆請款`); state.ym = rows[0].date.slice(0,7); switchView('month'); }
+  catch(err){ handleErr(err); }
+};
 
 /* ===== 導覽 ===== */
 function switchView(v){
